@@ -27,10 +27,11 @@ import vulns as V
 KINDS = {"rocketchat": "Rocket.Chat", "slack": "Slack", "teams": "Microsoft Teams",
          "discord": "Discord", "json": "Plain JSON"}
 EVENTS = {"act": "New in Act now", "soon": "New in Patch soon",
-          "updated": "Cloudflare updated its guidance", "status": "Status changed"}
+          "updated": "Cloudflare updated its guidance", "status": "Status changed",
+          "patch": "Patch Tuesday is out"}
 DEFAULT_EVENTS = ["act", "updated"]
-COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed"}
-ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋"}
+COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55"}
+ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹"}
 BATCH_LIMIT = 4   # more events than this for one webhook in one go -> one summary message
 
 SCHEMA = """
@@ -183,6 +184,27 @@ def summary_payload(kind, events, base_url, name="Heads Up"):
                              "text": f"{ICONS[e]} {EVENTS[e]}: [{v['title']}]({l})"} for e, v, l in lines]}}]}
     return {"event": "summary", "headline": head,
             "items": [{"event": e, "id": v["id"], "title": v["title"], "link": l} for e, v, l in lines]}
+
+
+def note_payload(kind, event, title, body, facts, link, name="Heads Up"):
+    """A message that isn't about one vulnerability (e.g. Patch Tuesday)."""
+    head = f"{ICONS[event]} {EVENTS[event]}"
+    color = COLORS[event]
+    if kind in ("rocketchat", "slack"):
+        return {"text": f"*{head}*", "attachments": [{"title": title, "title_link": link, "text": body, "color": color,
+                                                      "fields": [{"title": k, "value": v, "short": True} for k, v in facts]}]}
+    if kind == "discord":
+        return {"username": name, "content": f"**{head}**", "embeds": [{"title": title[:250], "url": link, "description": body[:3500],
+                "color": int(color[1:], 16), "fields": [{"name": k, "value": v[:1000], "inline": True} for k, v in facts]}]}
+    if kind == "teams":
+        return {"type": "message", "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json", "type": "AdaptiveCard", "version": "1.4",
+            "body": [{"type": "TextBlock", "text": head, "weight": "Bolder", "size": "Medium"},
+                     {"type": "TextBlock", "text": title, "weight": "Bolder", "wrap": True},
+                     {"type": "TextBlock", "text": body, "wrap": True},
+                     {"type": "FactSet", "facts": [{"title": k, "value": v} for k, v in facts]}],
+            "actions": [{"type": "Action.OpenUrl", "title": "Open in Heads Up", "url": link}]}}]}
+    return {"event": event, "headline": head, "title": title, "text": body, "link": link, "facts": dict(facts)}
 
 
 TEST_VULN = {
@@ -347,6 +369,13 @@ class Webhooks:
             for event, v, extra in mine:
                 await self.post(row, event, v["title"],
                                 payload(row["kind"], event, v, extra, f"{self.base_url}/#{v['id']}"))
+
+    async def send_note(self, event, title, body, facts, link):
+        if not self.box:
+            return
+        for row in self.db.execute("SELECT * FROM webhooks WHERE enabled=1").fetchall():
+            if event in set(json.loads(row["events"] or "[]")):
+                await self.post(row, event, title, note_payload(row["kind"], event, title, body, facts, link))
 
     # change detection
     def is_empty(self):

@@ -158,17 +158,19 @@ function binOf(v, max) {
   return r >= 0.6 ? 4 : r >= 0.3 ? 3 : r >= 0.12 ? 2 : r >= 0.04 ? 1 : 0;
 }
 
-function worldMap(rows, what) {
+function worldMap(rows, what, opts = {}) {
   const byIso = new Map(rows.map((r) => [r.iso, r]));
   const max = Math.max(...rows.map((r) => r.value), 0.0001);
+  const fmtV = opts.fmt || ((v) => pct(v));
+  const tipOf = opts.tip || ((r, c) => `${r.name || c.n}: ${pct(r.value)} of ${what}`);
   const paths = Object.entries(world.countries).map(([iso, c]) => {
     const r = byIso.get(iso);
-    const b = r ? binOf(r.value, max) : -1;
-    const tip = r ? `${r.name || c.n}: ${pct(r.value)} of ${what}` : `${c.n}: not in the top countries`;
+    const b = r ? (opts.bins ? opts.bins(r.value) : binOf(r.value, max)) : -1;
+    const tip = r ? tipOf(r, c) : `${c.n}: ${opts.none || "not in the top countries"}`;
     return `<path d="${c.d}" class="land ${b >= 0 ? `q${b}` : "nodata"}" data-tip="${esc(tip)}"/>`;
   }).join("");
-  const steps = [0.04, 0.12, 0.3, 0.6].map((f) => pct(f * max));
-  const legend = `<div class="legend scale"><span>Share of ${what}:</span>
+  const steps = [0.04, 0.12, 0.3, 0.6].map((f) => fmtV(f * max));
+  const legend = opts.legend || `<div class="legend scale"><span>Share of ${what}:</span>
     <i class="sw q0"></i><span>&lt; ${steps[0]}</span><i class="sw q1"></i><i class="sw q2"></i><i class="sw q3"></i><i class="sw q4"></i><span>≥ ${steps[3]}</span>
     <i class="sw nodata"></i><span>not in top ${rows.length}</span></div>`;
   return `${legend}<svg viewBox="${world.viewBox}" class="chart map">${paths}</svg>`;
@@ -230,6 +232,7 @@ function radarSection(radar) {
         pairs.length ? table(["From", "To", "Share"], pairs.map((p) => [esc(p.fromName || p.from), esc(p.toName || p.to), pct(p.value)])) : `<p class="muted">No data yet.</p>`, null)}
       ${card("c-industry", "Industries targeted", "Share of web attacks by the target's industry",
         hbars((d.l7Industry || []).slice(0, 10), { label: (r) => nice(r.name), value: (r) => r.value, tip: (r) => `${nice(r.name)}: ${pct(r.value)}`, fmtValue: (v) => pct(v) }), null)}
+      ${outageCards(d)}
       ${card("c-rules", "Types of web attacks", "What the blocked web attacks were trying to do (Cloudflare managed rules)",
         hbars((d.l7Rules || []).slice(0, 10), { label: (r) => r.name[0].toUpperCase() + r.name.slice(1), value: (r) => r.value, tip: (r) => `${r.name}: ${pct(r.value)} of web attacks caught by managed rules`, fmtValue: (v) => pct(v) }),
         table(["Attack type", "Share"], (d.l7Rules || []).map((r) => [esc(r.name), pct(r.value)])))}
@@ -264,6 +267,83 @@ function exploitBars() {
   return hbars(rows, { label: (r) => r.name, value: (r) => r.value, tip: (r) => `${r.name}: ${r.value} of ${open.length} open vulnerabilities` });
 }
 
+// --- outages -----------------------------------------------------------------------
+
+const CAUSES = { POWER_OUTAGE: "Power outage", CABLE_CUT: "Cable cut", GOVERNMENT_DIRECTED: "Government-ordered shutdown",
+  WEATHER: "Weather", MILITARY_ACTION: "Military action", TECHNICAL_PROBLEM: "Technical problem", MAINTENANCE: "Maintenance",
+  FIRE: "Fire", EARTHQUAKE: "Earthquake", CYBERATTACK: "Cyberattack", UNKNOWN: "Unknown" };
+const cause = (c) => CAUSES[c] || (c ? nice(c) : "Unknown");
+function duration(start, end) {
+  if (!start) return "";
+  if (!end) return `<b class="v crit">Ongoing</b> · ${hoursText((Date.now() - new Date(start)) / 3600000)}`;
+  return hoursText((new Date(end) - new Date(start)) / 3600000);
+}
+function hoursText(h) { return h < 1 ? "under an hour" : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`; }
+const when = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "");
+
+function outageCards(d) {
+  const outages = (d.outages || []).slice().sort((a, b) => String(b.start).localeCompare(String(a.start)));
+  const anomalies = (d.anomalies || []).slice().sort((a, b) => String(b.start).localeCompare(String(a.start)));
+  const counts = new Map();
+  for (const o of outages) for (const pl of new Set(o.places.map((x) => x.iso).filter(Boolean))) {
+    const c = counts.get(pl) || { iso: pl, name: o.places.find((x) => x.iso === pl)?.name, value: 0, ongoing: 0 };
+    c.value += 1; c.ongoing += o.end ? 0 : 1; counts.set(pl, c);
+  }
+  const rows = [...counts.values()];
+  const ongoing = outages.filter((o) => !o.end).length;
+  const legend = `<div class="legend scale"><span>Outages per country:</span><i class="sw q1"></i><span>1</span><i class="sw q2"></i><span>2</span><i class="sw q3"></i><span>3–4</span><i class="sw q4"></i><span>5+</span><i class="sw nodata"></i><span>none reported</span></div>`;
+  const map = rows.length ? worldMap(rows, "outages", {
+    bins: (v) => (v >= 5 ? 4 : v >= 3 ? 3 : v >= 2 ? 2 : 1), legend, none: "no outage reported",
+    tip: (r, c) => `${c.n}: ${r.value} outage${r.value === 1 ? "" : "s"} in 30 days${r.ongoing ? `, ${r.ongoing} ongoing` : ""}`,
+  }) : `<p class="muted">No outages reported in the last 30 days.</p>`;
+  const place = (o) => [...new Set(o.places.map((x) => x.name || x.iso))].join(", ") || o.asns.map((a) => a.name).join(", ") || "–";
+  const table = outages.length ? `<table class="data"><thead><tr><th>Started</th><th>Where</th><th>Cause</th><th>How long</th><th></th></tr></thead><tbody>${outages.slice(0, 40).map((o) => `<tr>
+      <td>${esc(when(o.start))}</td><td><b>${esc(place(o))}</b>${o.asns.length ? `<div class="small muted">${esc(o.asns.slice(0, 3).map((a) => a.name).join(", "))}</div>` : ""}<div class="small muted">${esc(o.description || "")}</div></td>
+      <td>${esc(cause(o.cause))}${o.type ? `<div class="small muted">${esc(nice(o.type))}</div>` : ""}</td><td>${duration(o.start, o.end)}</td>
+      <td>${o.url ? `<a href="${esc(o.url)}" target="_blank" rel="noopener">Details ↗</a>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">None.</p>`;
+  const anomTable = anomalies.length ? `<table class="data"><thead><tr><th>Started</th><th>Network or place</th><th>Status</th><th>How long</th></tr></thead><tbody>${anomalies.slice(0, 30).map((a) => `<tr>
+      <td>${esc(when(a.start))}</td><td><b>${esc(a.asnName ? `${a.asnName} (AS${a.asn})` : a.place || "–")}</b>${a.place && a.asnName ? `<div class="small muted">${esc(a.place)}</div>` : ""}</td>
+      <td>${a.status === "VERIFIED" ? "Confirmed" : "Not yet confirmed"}</td><td>${duration(a.start, a.end)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">No traffic drops in the last 7 days.</p>`;
+  return `${card("c-outmap", `Internet outages, last 30 days${ongoing ? ` · ${ongoing} ongoing` : ""}`, "Outages Cloudflare confirmed and explained (power cuts, cable cuts, shutdowns, …)", map,
+      table.replace('<table class="data">', '<table class="data">'), "")}
+    ${card("c-outlist", "Outage details", "Newest first; “Details” links to Cloudflare's write-up", `<div class="tbl-scroll">${table}</div>`, null)}
+    ${card("c-anom", "Sudden traffic drops, last 7 days", "Networks or places whose traffic suddenly fell; often an outage before it's confirmed", `<div class="tbl-scroll">${anomTable}</div>`, null)}`;
+}
+
+// --- Patch Tuesday -----------------------------------------------------------------
+
+let ptIndex = 0;
+function patchTuesdaySection(list) {
+  const head = `<h2 class="sec">Microsoft Patch Tuesday <span class="badge ms">Microsoft</span></h2>`;
+  if (!list || !list.length) return `${head}<div class="box muted">Microsoft's updates arrive with the first fetch (within a few minutes).</div>`;
+  const m = list[Math.min(ptIndex, list.length - 1)];
+  const tools = `<div class="seg">${list.map((x, i) => `<button data-pt="${i}" class="${x === m ? "on" : ""}">${esc(x.label.split(" ")[0])}</button>`).join("")}</div>`;
+  const tile = (n, t, d, cls = "") => `<div class="stat ${cls}"><div class="n">${fmt(n)}</div><div class="t">${t}</div><div class="d">${d}</div></div>`;
+  const flags = (r) => [r.exploited ? `<span class="pill crit">Exploited</span>` : "", r.disclosed ? `<span class="pill high">Disclosed</span>` : "",
+    (r.likelihood || "").startsWith("Exploitation More Likely") ? `<span class="pill">More likely</span>` : ""].join(" ");
+  return `${head}
+    <div class="pt-head"><div class="muted">${esc(m.label)} · released ${esc(m.date ? day(m.date) : "")} · Microsoft's own products only</div>${tools}</div>
+    <div class="stats">
+      ${tile(m.total, "Fixes", "Vulnerabilities fixed this month")}
+      ${tile(m.exploited, "Already exploited", "Zero-days: attacked before the fix", m.exploited ? "warn bad" : "")}
+      ${tile(m.disclosed, "Publicly disclosed", "Details were out before the fix", m.disclosed ? "warn" : "")}
+      ${tile(m.critical, "Critical", "Microsoft's highest rating")}
+      ${tile(m.likely, "Exploitation more likely", "Microsoft expects attacks on these")}
+    </div>
+    <div class="charts-grid">
+      ${card("c-pt-first", "Patch these first", "Exploited, disclosed, and critical fixes Microsoft expects to be attacked",
+        m.first.length ? `<div class="tbl-scroll"><table class="data"><thead><tr><th>CVE</th><th>What</th><th>Product</th><th>Rating</th><th>Flags</th></tr></thead><tbody>${m.first.map((r) => `<tr>
+          <td><a class="mono" href="https://msrc.microsoft.com/update-guide/vulnerability/${esc(r.cve)}" target="_blank" rel="noopener">${esc(r.cve)}</a></td>
+          <td>${esc(r.title)}</td><td>${esc(r.product || "")}</td><td>${esc(r.severity || "")}${r.cvss ? ` · ${r.cvss.toFixed(1)}` : ""}</td><td>${flags(r)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="muted">Nothing stands out this month.</p>`, null)}
+      ${card("c-pt-products", "Most-fixed products", "Number of fixes per product this month; hover for how many are critical",
+        hbars(m.byProduct, { label: (r) => r.name, value: (r) => r.count, tip: (r) => `${r.name}: ${r.count} fixes, ${r.critical} critical` }),
+        table(["Product", "Fixes", "Critical"], m.byProduct.map((r) => [esc(r.name), r.count, r.critical])))}
+      ${card("c-pt-impact", "What attackers could do", "Fixes by impact, e.g. run code remotely or gain higher privileges",
+        hbars(m.byImpact, { label: (r) => r.name, value: (r) => r.count, tip: (r) => `${r.name}: ${r.count} fixes` }),
+        table(["Impact", "Fixes"], m.byImpact.map((r) => [esc(r.name), r.count])))}
+    </div>`;
+}
+
 // --- page ---------------------------------------------------------------------------
 
 function renderCharts() {
@@ -291,6 +371,7 @@ function renderCharts() {
       ${card("c-exploits", "Open vulnerabilities with public exploit code", "Strongest signal per vulnerability",
         exploitBars(), null)}
     </div>
+    ${patchTuesdaySection(c.patchTuesday)}
     ${radarSection(c.radar)}
     <p class="muted small charts-foot">Sources: CISA Known Exploited Vulnerabilities, FIRST EPSS, NVD, Cloudflare Radar (attack data, CC BY-NC 4.0). Map outlines: Natural Earth.</p>`;
   const setup = $("#radar-setup");
@@ -325,6 +406,8 @@ document.addEventListener("click", (e) => {
   }
   const m = e.target.closest("[data-map]");
   if (m) { const [k, v] = m.dataset.map.split(":"); mapMode[k] = v; return renderCharts(); }
+  const pt = e.target.closest("[data-pt]");
+  if (pt) { ptIndex = Number(pt.dataset.pt); return renderCharts(); }
   const o = e.target.closest("#charts [data-open]");
   if (o) return openDrawer(o.dataset.open);
 });

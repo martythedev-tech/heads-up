@@ -123,6 +123,8 @@ RADAR_QUERIES = {
     "l7Product": ("/attacks/layer7/summary/MITIGATION_PRODUCT", {"dateRange": "7d"}),
     "l7Rules": ("/attacks/layer7/summary/MANAGED_RULES", {"dateRange": "7d"}),
     "l7Series": ("/attacks/layer7/timeseries", {"dateRange": "28d", "aggInterval": "1d"}),
+    "outages": ("/annotations/outages", {"dateRange": "30d", "limit": "100"}),
+    "anomalies": ("/traffic_anomalies", {"dateRange": "7d", "limit": "60"}),
 }
 RADAR_TEST = ("/attacks/layer7/summary/MITIGATION_PRODUCT", {"dateRange": "1d"})
 RADAR_SCHEMA = """
@@ -173,6 +175,36 @@ def _simplify(key, result):
             except (TypeError, ValueError):
                 pass
         return sorted(rows, key=lambda r: -r["value"])
+    if key == "outages":
+        rows = []
+        for a in result.get("annotations") or []:
+            places = [{"iso": l.get("code"), "name": l.get("name")} for l in a.get("locationsDetails") or []]
+            for e in a.get("entities") or []:
+                if e.get("entityLocation") and not any(p["iso"] == e["entityLocation"] for p in places):
+                    places.append({"iso": e.get("entityLocation"), "name": e.get("entityName")})
+                elif e.get("entityName") and e.get("entityType") == "GEOLOCATION":
+                    for p in places:
+                        if p["iso"] == e.get("entityLocation"):
+                            p["name"] = e["entityName"]
+            asns = [{"asn": x.get("asn"), "name": x.get("name")} for x in a.get("asnsDetails") or []]
+            for x in a.get("asnsDetails") or []:
+                loc = x.get("locations") or x.get("location") or {}
+                if isinstance(loc, dict) and loc.get("code") and not any(p["iso"] == loc["code"] for p in places):
+                    places.append({"iso": loc["code"], "name": loc.get("name")})
+            o = a.get("outage") or {}
+            rows.append({"id": a.get("id"), "start": a.get("startDate"), "end": a.get("endDate"),
+                         "description": a.get("description"), "cause": o.get("outageCause"),
+                         "type": o.get("outageType"), "places": places, "asns": asns, "url": a.get("linkedUrl")})
+        return rows
+    if key == "anomalies":
+        rows = []
+        for a in result.get("trafficAnomalies") or []:
+            asn = a.get("asnDetails") or {}
+            loc = a.get("locationDetails") or asn.get("location") or {}
+            rows.append({"start": a.get("startDate"), "end": a.get("endDate"), "status": a.get("status"),
+                         "type": a.get("type"), "iso": loc.get("code"), "place": loc.get("name"),
+                         "asn": asn.get("asn"), "asnName": asn.get("name")})
+        return rows
     if key == "l7Series":
         s = result.get("serie_0") or {}
         return [{"t": t, "value": float(v)} for t, v in zip(s.get("timestamps") or [], s.get("values") or [])]

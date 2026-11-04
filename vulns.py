@@ -69,7 +69,7 @@ def build(items, releases):
     out, by_cve = [], {}
 
     def base(p):
-        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "usnPrimary": False}
+        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "usnPrimary": False}
 
     def add(v):
         out.append(v)
@@ -89,6 +89,15 @@ def build(items, releases):
             else:
                 v = base(it)
                 v["kevs"] = [it]
+                add(v)
+    for it in items:
+        if it["source"] == "msrc":
+            cve = it["cves"][0]["id"] if it["cves"] else None
+            if cve in by_cve:
+                by_cve[cve]["ms"].append(it)
+            else:
+                v = base(it)
+                v["ms"] = [it]
                 add(v)
     for it in items:
         if it["source"] != "ubuntu":
@@ -115,8 +124,13 @@ def describe(v, releases, today):
     kev_dates = sorted(c["kev"]["added"] for c in cves if c.get("kev") and c["kev"].get("added"))
     cvss = _max(c.get("cvss") for c in cves)
     epss = _max(c.get("epss") for c in cves)
-    exploited = bool(kev_dates)
-    kev_last = kev_dates[-1] if kev_dates else None
+    ms_info = [c["msrc"] for c in cves if c.get("msrc")]
+    ms_exploited = sorted(m["releaseLabel"] for m in ms_info if m["exploited"])
+    ms_disclosed = any(m["disclosed"] for m in ms_info)
+    ms_dates = sorted(i["published"] for i in v["ms"] if i.get("extra", {}).get("exploited") and i.get("published"))
+    exploited = bool(kev_dates) or bool(ms_exploited)
+    kev_last = kev_dates[-1] if kev_dates else (ms_dates[-1] if ms_dates else None)
+    exploited_by = "CISA" if kev_dates else "Microsoft" if ms_exploited else None
     # public exploit code, strongest first
     n_msf = sum(len(c.get("msf") or []) for c in cves)
     n_edb = sum(len(c.get("edb") or []) for c in cves)
@@ -145,6 +159,9 @@ def describe(v, releases, today):
         title, desc = zw["title"], zw["summary"]
     elif v["usnPrimary"]:
         title, desc = p["title"], p["summary"]
+    elif p["source"] == "msrc":
+        title = f"{(p.get('tags') or ['Microsoft'])[0]}: {p['title']}"
+        desc = p["summary"]
     else:
         title = f"{p['title']}: {kev_short(p)}"
         desc = str(p.get("summary") or "")
@@ -164,7 +181,7 @@ def describe(v, releases, today):
     elif exploited:
         group = "aware"
     elif (cf_urgent or (cvss or 0) >= 9 or prio == "critical" or (epss or 0) >= 0.5
-          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7)):
+          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7) or ms_disclosed):
         group = "soon"
     else:
         group = "aware"
@@ -174,12 +191,14 @@ def describe(v, releases, today):
     if done:
         why += [["Marked ", False], [STATE_LABEL[triage["state"]], True], [f" by {triage['by']}.", False]]
     elif exploited:
-        why += [["Attackers are using this", True], [f", confirmed by CISA on {short_date(kev_last)}.", False]]
+        why += [["Attackers are using this", True], [f", confirmed by {exploited_by} on {short_date(kev_last)}.", False]]
         if zw:
             why += [[" Cloudflare says: ", False], [zw.get("headline") or "", True], [".", False]]
         if not recent_kev and not cf_urgent:
             product = v["kevs"][0]["title"] if v["kevs"] else "it"
             why += [[f" Reported over 2 weeks ago; check whether you run {product}.", False]]
+    elif ms_disclosed:
+        why += [["Publicly disclosed", True], [" before Microsoft's fix (a zero-day); not seen exploited yet.", False]]
     elif zw:
         why += [["Cloudflare says: ", False], [zw.get("headline") or "", True], [". Not confirmed as exploited yet.", False]]
     elif v["usnPrimary"]:
@@ -194,13 +213,15 @@ def describe(v, releases, today):
         why += [[" Proof-of-concept code is on GitHub.", False]]
     if not done and not exploited and epss_trend == "rising":
         why += [[" Exploit chance is rising", True], [f" (from {epss_was * 100:.1f}% a month ago).", False]]
+    if not done and ms_info:
+        why += [[f" Microsoft fix out ({ms_info[0]['releaseLabel']} updates).", False]]
     if not done and not v["usnPrimary"]:
         if ubuntu["fixed"]:
             why += [[f" Ubuntu fix out for {', '.join(ubuntu['fixed'])}.", False]]
         elif ubuntu["pending"]:
             why += [[" Ubuntu fix still pending.", False]]
 
-    reported = [s for s, on in (("Cloudflare", bool(zw)), ("CISA", exploited),
+    reported = [s for s, on in (("Cloudflare", bool(zw)), ("CISA", bool(kev_dates)), ("Microsoft", bool(ms_info)),
                                 ("Ubuntu", bool(ubuntu["fixed"] or ubuntu["pending"]))) if on]
     return {
         "id": v["id"], "group": group, "title": title, "desc": desc, "why": why,
@@ -213,8 +234,10 @@ def describe(v, releases, today):
         "zwHeadline": zw.get("headline") if zw else None,
         "zwLatest": ((zw.get("extra") or {}).get("chronology") or [None])[0] if zw else None,
         "kevIds": [k["id"] for k in v["kevs"]], "usnIds": [u["id"] for u in v["usns"]],
+        "msIds": [m["id"] for m in v["ms"]], "exploitedBy": exploited_by,
+        "microsoft": ms_info[0] if ms_info else None,
         "latest": _max([i.get("updated") or i.get("published") for i in
-                        [zw, *v["kevs"], *v["usns"]] if i]) or "",
+                        [zw, *v["kevs"], *v["usns"], *v["ms"]] if i]) or "",
         "triage": triage,
     }
 

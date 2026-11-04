@@ -30,11 +30,12 @@ from aiohttp import ClientSession, ClientTimeout, web
 
 import charts as C
 import exploits as X
+import msrc as MS
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -119,6 +120,7 @@ def db_open():
         db.execute("ALTER TABLE kev ADD COLUMN cwes TEXT")
     db.executescript(C.RADAR_SCHEMA)
     X.migrate(db)
+    MS.migrate(db)
     return db
 
 
@@ -232,6 +234,7 @@ class Fetcher:
         self.last_run = {}
         self.after_refresh = None
         self.radar_token = lambda: None
+        self.on_patch_tuesday = None
         self.rounds = 0
 
     async def get(self, url, *, params=None, as_json=False):
@@ -262,6 +265,7 @@ class Fetcher:
                     ("kev", 3 * 3600, self.kev),
                     ("ubuntu", 60 * 60, self.ubuntu),
                     ("exploits", 24 * 3600, self.exploits),
+                    ("msrc", 6 * 3600, self.msrc),
                     ("enrich", 60 * 60, self.enrich),
                     ("radar", 60 * 60, self.radar)]
             for name, every, job in jobs:
@@ -393,6 +397,17 @@ class Fetcher:
             })
         retire_missing(self.db, "ubuntu", ids)
         source_ok(self.db, "ubuntu", len(ids))
+
+    async def msrc(self):
+        n = await MS.refresh(self.db, self.session)
+        ids = []
+        for item in MS.zero_day_items(self.db):
+            ids.append(item["id"])
+            upsert_item(self.db, item)
+        retire_missing(self.db, "msrc", ids)
+        source_ok(self.db, "msrc", n)
+        if self.on_patch_tuesday:
+            await self.on_patch_tuesday()
 
     async def exploits(self):
         n = await X.refresh_index(self.db, self.session)
@@ -646,6 +661,8 @@ def build_state(db):
             "epssSeries": json.loads(r["epss_series"]) if r["epss_series"] else None,
             "poc": json.loads(r["poc"]) if r["poc"] is not None else None,
         }
+    for cve_id, info in MS.cve_info(db, cves).items():
+        cves[cve_id]["msrc"] = info
     for cve_id, ex in X.exploit_rows(db, cves).items():
         cves[cve_id]["edb"] = ex["edb"][:5]
         cves[cve_id]["msf"] = ex["msf"][:5]
@@ -674,6 +691,25 @@ def compressed(request, payload):
     if "gzip" in request.headers.get("Accept-Encoding", ""):
         resp.enable_compression()
     return resp
+
+
+async def announce_patch_tuesday(app):
+    """Tell webhooks once when a new month's Microsoft updates appear."""
+    db = app["db"]
+    latest = next(iter(MS.summary(db)), None)
+    if not latest:
+        return
+    row = db.execute("SELECT value FROM meta WHERE key='msrc_announced'").fetchone()
+    db.execute("INSERT OR REPLACE INTO meta VALUES('msrc_announced', ?)", (latest["release"],))
+    if row is None or row[0] == latest["release"]:
+        return  # first run records what's already out; same month: nothing new
+    log(f"alerts: patch tuesday {latest['release']}")
+    await app["hooks"].send_note("patch", f"Microsoft {latest['label']} security updates", (
+        f"{latest['total']} fixes: {latest['critical']} critical, {latest['exploited']} already exploited, "
+        f"{latest['disclosed']} publicly disclosed, {latest['likely']} rated exploitation more likely."),
+        [("Exploited (zero-days)", str(latest["exploited"])), ("Critical", str(latest["critical"])),
+         ("Publicly disclosed", str(latest["disclosed"])), ("Patch first", ", ".join(f["cve"] for f in latest["first"][:5]) or "–")],
+        f"{app['hooks'].base_url}/")
 
 
 async def notify_changes(app):
@@ -730,6 +766,7 @@ async def api_charts(request):
     out = C.build(db, state["vulns"], state["items"])
     radar, at = C.radar_data(db)
     src = db.execute("SELECT * FROM sources WHERE name='radar'").fetchone()
+    out["patchTuesday"] = MS.summary(db)
     out["radar"] = {"configured": bool(radar_token(request.app)), "data": radar, "at": at,
                     "error": src["error"] if src and src["error"] and (not src["ok_at"] or src["err_at"] > src["ok_at"]) else None}
     return compressed(request, out)
@@ -961,6 +998,7 @@ def make_app(db, fetcher):
     app["fresh"] = app["hooks"].is_empty()
     fetcher.after_refresh = lambda: notify_changes(app)
     fetcher.radar_token = lambda: radar_token(app)
+    fetcher.on_patch_tuesday = lambda: announce_patch_tuesday(app)
     app.router.add_get("/api/charts", api_charts)
     app.router.add_get("/api/settings", api_settings)
     app.router.add_post("/api/settings/radar", api_settings_radar)

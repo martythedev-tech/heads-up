@@ -31,6 +31,8 @@
   --src-ubu-bg: #fbe9f1;
   --src-ex: #6250d6;
   --src-ex-bg: #eeebfc;
+  --src-ms: #0e7a55;
+  --src-ms-bg: #e3f4ec;
   --shadow: 0 1px 2px rgb(16 24 40 / 5%);
   --radius: 8px;
   --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
@@ -62,6 +64,8 @@
     --src-ubu-bg: #36162a;
     --src-ex: #9085e9;
     --src-ex-bg: #221d45;
+    --src-ms: #3fc89a;
+    --src-ms-bg: #10291f;
     --shadow: none;
     --series-1: #3987e5;
     --series-2: #d95926;
@@ -435,3 +439,20 @@ ol.steps { margin: 6px 0 4px; padding-left: 20px; line-height: 1.6; }
 .spark-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 table.data tr.click { cursor: pointer; }
 table.data tr.click:hover td { background: var(--panel-2); }
+
+/* microsoft, outages */
+.badge.ms { background: var(--src-ms-bg); color: var(--src-ms); }
+.box.src-ms { border-top: 3px solid var(--src-ms); }
+.sources-strip { grid-template-columns: repeat(5, 1fr); }
+.src-card .what { font-size: 12px; }
+.pt-head { display: flex; justify-content: space-between; align-items: center; margin: -2px 0 10px; }
+.pt-head .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.pt-head .seg button { border: 0; background: var(--panel); height: 28px; padding: 0 12px; font-size: 12.5px; color: var(--muted); }
+.pt-head .seg button + button { border-left: 1px solid var(--line); }
+.pt-head .seg button.on { background: var(--panel-2); color: var(--text); font-weight: 600; }
+.stat.bad .n { color: var(--crit); }
+.pill { display: inline-flex; height: 20px; align-items: center; padding: 0 7px; border-radius: 4px; font-size: 11.5px; font-weight: 600; background: var(--panel-2); color: var(--muted); white-space: nowrap; }
+.pill.crit { background: var(--crit-bg); color: var(--crit); }
+.pill.high { background: var(--high-bg); color: var(--high); }
+.tbl-scroll { max-height: 420px; overflow-y: auto; }
+#c-pt-first, #c-outmap { grid-column: 1 / -1; }

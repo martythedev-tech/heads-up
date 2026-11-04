@@ -11,6 +11,7 @@ const SOURCES = {
   cf: { name: "Cloudflare", what: "Expert write-ups of the most important internet-facing vulnerabilities, with what to do.", feeds: ["zerowire"], url: "https://radar.cloudflare.com/security/zero-wire", stale: 2 * 3600 },
   cisa: { name: "CISA", what: "US government list of vulnerabilities attackers are confirmed to be using.", feeds: ["kev"], url: "https://www.cisa.gov/known-exploited-vulnerabilities-catalog", stale: 8 * 3600 },
   ubu: { name: "Ubuntu", what: "Security updates for Ubuntu and whether each release has a fix yet.", feeds: ["ubuntu", "osv"], url: "https://ubuntu.com/security/notices", stale: 3 * 3600 },
+  ms: { name: "Microsoft", what: "Patch Tuesday: Microsoft's monthly security fixes, including zero-days.", feeds: ["msrc"], url: "https://msrc.microsoft.com/update-guide", stale: 8 * 3600 },
   ex: { name: "Exploit code", what: "Public attack code: Metasploit modules, Exploit-DB and proof-of-concepts on GitHub.", feeds: ["exploits", "poc"], url: "https://www.exploit-db.com", stale: 26 * 3600 },
 };
 const GROUPS = {
@@ -85,8 +86,9 @@ function buildVulns() {
     v.zw = src.zwId ? byId.get(src.zwId) : null;
     v.kevs = src.kevIds.map((id) => byId.get(id)).filter(Boolean);
     v.usns = src.usnIds.map((id) => byId.get(id)).filter(Boolean);
+    v.ms = (src.msIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.cveList = v.primary.cves || [];
-    v.items = [v.zw, ...v.kevs, ...v.usns].filter(Boolean);
+    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms].filter(Boolean);
     v.isNew = v.items.some(isNew);
     v.done = v.group === "done";
     v.why = src.why.map(([t, bold]) => (bold ? `<b>${esc(t)}</b>` : esc(t))).join("");
@@ -106,7 +108,8 @@ function matches(v) {
 function badges(v) {
   const b = [];
   if (v.zw) b.push(`<span class="badge cf">Cloudflare <span class="detail">briefing</span></span>`);
-  if (v.exploited) b.push(`<span class="badge cisa">CISA <span class="detail">exploited</span></span>`);
+  if (v.cveList.some((c) => c.kev)) b.push(`<span class="badge cisa">CISA <span class="detail">exploited</span></span>`);
+  if (v.microsoft) b.push(`<span class="badge ms">Microsoft <span class="detail">${v.microsoft.exploited ? "zero-day, fixed" : v.microsoft.disclosed ? "disclosed, fixed" : "fix out"}</span></span>`);
   if (v.exploit) b.push(`<span class="badge ex">${{ metasploit: "Metasploit", exploitdb: "Exploit-DB", poc: "GitHub" }[v.exploit]} <span class="detail">${v.exploit === "poc" ? "proof of concept" : "exploit"}</span></span>`);
   if (v.ubuntu.fixed.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix out</span></span>`);
   else if (v.ubuntu.pending.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix pending</span></span>`);
@@ -279,6 +282,18 @@ function sparkline(series, w = 84, h = 22) {
   return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="exploit chance over 30 days"><polyline points="${pts}"/><circle cx="${last[0]}" cy="${last[1]}" r="2.5"/></svg>`;
 }
 
+function msBox(v) {
+  const rows = v.cveList.filter((c) => c.msrc);
+  if (!rows.length) return "";
+  return `<div class="box src-ms"><h4><span class="badge ms">Microsoft</span> fixed in ${esc(rows[0].msrc.releaseLabel)} security updates</h4>
+    ${rows.slice(0, 12).map((c) => `<div class="kv">
+      <span class="k">Vulnerability</span><span><a class="mono" href="https://msrc.microsoft.com/update-guide/vulnerability/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a> · ${esc(c.msrc.product || "")}</span>
+      <span class="k">Microsoft's rating</span><span>${esc(c.msrc.severity || "")}</span>
+      <span class="k">Status at release</span><span>${c.msrc.exploited ? `<b class="v crit">Already exploited</b>` : c.msrc.disclosed ? `<b class="v high">Publicly disclosed</b>` : "Not exploited, not disclosed"}</span>
+      <span class="k">Microsoft expects</span><span>${esc(c.msrc.likelihood || "–")}</span></div>`).join(`<hr class="sep">`)}
+    <p class="small muted">Install the ${esc(rows[0].msrc.releaseLabel)} updates (Windows Update, WSUS or Intune) on affected systems.</p></div>`;
+}
+
 function exploitBox(v) {
   if (v.usnPrimary) return "";
   const msf = v.cveList.flatMap((c) => (c.msf || []).map((m) => ({ ...m, cve: c.id })));
@@ -341,7 +356,7 @@ function renderDrawer(id, keepScroll) {
       <h3>${esc(v.title)}</h3>
       <p class="d-why">${v.why}</p>
     </div>
-    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
+    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${msBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
   drawer.hidden = false;
   $("#scrim").hidden = false;
   if (keepScroll) drawer.scrollTop = scroll;
@@ -410,6 +425,7 @@ const EVENT_HELP = {
   soon: "A vulnerability appears in Patch soon (critical, not exploited yet).",
   updated: "Cloudflare changes its advice on something in Act now or Patch soon.",
   status: "Someone marks an item Investigating, Not affected or Patched.",
+  patch: "Microsoft publishes a month's security updates: one summary with zero-days, criticals and what to patch first.",
 };
 
 async function openHooks() {

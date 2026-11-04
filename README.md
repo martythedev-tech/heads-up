@@ -28,7 +28,28 @@ Sources, each with its own colour on the page:
 - **Cloudflare**: [Zero Wire](https://radar.cloudflare.com/security/zero-wire) briefings (RSS, every 30 min)
 - **CISA**: the [Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) catalog (every 3 h)
 - **Ubuntu**: Security Notices and per-release fix status (hourly), rated by Ubuntu's own priority (via [OSV](https://osv.dev))
-- Scores per CVE: severity from [NVD](https://nvd.nist.gov) (CVSS) and exploit chance from [FIRST EPSS](https://www.first.org/epss/)
+- **Microsoft**: Patch Tuesday from the [Security Update Guide](https://msrc.microsoft.com/update-guide) (every 6 h): zero-days (exploited or publicly disclosed) join the list; every CVE Microsoft fixed is marked
+- **Exploit code**: [Metasploit](https://github.com/rapid7/metasploit-framework) exploit modules and [Exploit-DB](https://www.exploit-db.com) entries (daily), and proof-of-concept repositories on GitHub via [PoC-in-GitHub](https://github.com/nomi-sec/PoC-in-GitHub)
+- Scores per CVE: severity from [NVD](https://nvd.nist.gov) (CVSS), and exploit chance from [FIRST EPSS](https://www.first.org/epss/) with its trend over the last month
+
+Not yet exploited items move to **Patch soon** when they are critical, rated
+critical by Ubuntu, likely to be exploited, publicly disclosed by Microsoft,
+or have a Metasploit module / Exploit-DB entry and High severity or more.
+
+### Charts tab
+
+- **Right now**: items waiting for a look, statuses, typical time to close;
+  severity against exploit chance; exploit chance rising fastest; open items
+  with public exploit code
+- **CISA trends**: newly exploited per month, most exploited vendors, most
+  common weakness types
+- **Microsoft Patch Tuesday** (last three months): fixes, zero-days, criticals,
+  "exploitation more likely", what to patch first, by product and impact
+- **Internet attacks** ([Cloudflare Radar](https://radar.cloudflare.com),
+  optional, needs a free read-only token): world map of where web and DDoS
+  attacks come from and who they target, attack volume, attack routes,
+  industries, attack types, internet outages (30 days) and sudden traffic
+  drops (7 days)
 
 Anyone who can reach the page can read it. Signed-in users mark items
 **Investigating**, **Not affected** or **Patched** with a note; every change is
@@ -40,8 +61,9 @@ logged under their name.
 
 - A Linux server with **systemd 250 or newer**, **Python 3.11+** and **OpenSSL**.
   Tested on Ubuntu 26.04; Ubuntu 24.04 and Debian 12 or newer work the same way.
-- Outbound HTTPS from the server to radar.cloudflare.com, cisa.gov,
-  ubuntu.com, api.osv.dev, api.first.org and services.nvd.nist.gov.
+- Outbound HTTPS from the server to radar.cloudflare.com, api.cloudflare.com,
+  cisa.gov, ubuntu.com, api.osv.dev, api.first.org, services.nvd.nist.gov,
+  api.msrc.microsoft.com, gitlab.com (Exploit-DB) and raw.githubusercontent.com.
 - Two free ports: **9443** (the dashboard, HTTPS) and **9080** (redirects to
   HTTPS and serves the certificate to trust). Both can be changed.
 - `sudo` on the server.
@@ -159,6 +181,7 @@ choice of what to be told about:
 - **Cloudflare updated its guidance** on something in Act now or Patch soon
   (the message says what changed)
 - **Status changed**: someone marked an item Investigating, Not affected or Patched
+- **Patch Tuesday is out**: one summary when Microsoft publishes a month's updates
 
 Nothing is sent for what already exists when Heads Up first starts. More than
 four alerts at once arrive as one summary. Webhook URLs are stored encrypted.
@@ -178,6 +201,15 @@ if it failed) shows under each webhook.
 4. Save and copy the **Webhook URL**.
 5. In Heads Up: **Webhooks → Add webhook**, type **Rocket.Chat**, paste the URL,
    pick events, **Add webhook**, then **Send test**.
+
+### Cloudflare Radar (optional)
+
+1. At [dash.cloudflare.com](https://dash.cloudflare.com) (a free account works):
+   **My Profile → API Tokens → Create Token → Custom token**.
+2. Permissions: **Account · Radar · Read**, nothing else. Leave IP filtering
+   empty. Create it and copy the token.
+3. In Heads Up: click your name → **Cloudflare Radar** → paste → **Turn on**.
+   The token is checked with Cloudflare and stored encrypted.
 
 ### Slack, Microsoft Teams, Discord, anything else
 
@@ -245,7 +277,8 @@ one (the keyring entry is `service heads-up purpose admin`).
 ## How it's built
 
 A small aiohttp app (`app.py`; grouping in `vulns.py`, alerts in
-`webhooks.py`, accounts in `users.py`) with a static front end and SQLite
+`webhooks.py`, accounts in `users.py`, charts and Radar in `charts.py`,
+exploit code in `exploits.py`, Microsoft in `msrc.py`) with a static front end and SQLite
 state, run by a hardened systemd unit (`DynamicUser`, read-only system,
 secrets via `systemd-creds`). Run it locally without TLS:
 
