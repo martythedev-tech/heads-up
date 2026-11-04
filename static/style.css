@@ -33,6 +33,8 @@
   --src-ex-bg: #eeebfc;
   --src-ms: #0e7a55;
   --src-ms-bg: #e3f4ec;
+  --src-vc: #0b6e8a;
+  --src-vc-bg: #e1f2f7;
   --shadow: 0 1px 2px rgb(16 24 40 / 5%);
   --radius: 8px;
   --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
@@ -66,6 +68,8 @@
     --src-ex-bg: #221d45;
     --src-ms: #3fc89a;
     --src-ms-bg: #10291f;
+    --src-vc: #4cc3e3;
+    --src-vc-bg: #0e2a33;
     --shadow: none;
     --series-1: #3987e5;
     --series-2: #d95926;
@@ -456,3 +460,9 @@ table.data tr.click:hover td { background: var(--panel-2); }
 .pill.high { background: var(--high-bg); color: var(--high); }
 .tbl-scroll { max-height: 420px; overflow-y: auto; }
 #c-pt-first, #c-outmap { grid-column: 1 / -1; }
+
+/* vulncheck */
+.badge.vc { background: var(--src-vc-bg); color: var(--src-vc); }
+.box.src-vc { border-top: 3px solid var(--src-vc); }
+.sources-strip { grid-template-columns: repeat(3, 1fr); }
+ul.plain { list-style: none; padding: 0; margin: 0; }

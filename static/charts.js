@@ -365,6 +365,13 @@ function renderCharts() {
         c.kevCwes.length ? hbars(c.kevCwes, { label: (r) => r.name, value: (r) => r.count, tip: (r) => `${r.name} (${r.cwe}): ${r.count}` }) : `<p class="muted">Weakness types arrive with the next CISA update (within 3 hours).</p>`,
         table(["Weakness", "CWE", "Count"], c.kevCwes.map((r) => [esc(r.name), esc(r.cwe), r.count])))}
     </div>
+    ${c.vulncheck ? `<h2 class="sec">What VulnCheck adds <span class="badge vc">VulnCheck KEV</span> <span class="muted small">last ${c.vulncheck.days} days</span></h2>
+    <div class="stats">
+      <div class="stat"><div class="n">${fmt(c.vulncheck.total)}</div><div class="t">Newly exploited</div><div class="d">Added to VulnCheck KEV</div></div>
+      <div class="stat warn"><div class="n">${fmt(c.vulncheck.notOnCisa)}</div><div class="t">Not on CISA's list</div><div class="d">Only VulnCheck has these</div></div>
+      <div class="stat"><div class="n">${fmt(c.vulncheck.earlierThanCisa)}</div><div class="t">Listed before CISA</div><div class="d">VulnCheck knew first</div></div>
+      <div class="stat"><div class="n">${c.vulncheck.medianLeadDays == null ? "–" : `${c.vulncheck.medianLeadDays} d`}</div><div class="t">Typical head start</div><div class="d">Median days ahead of CISA</div></div>
+    </div>` : ""}
     <div class="charts-grid">
       ${card("c-rising", "Exploit chance rising fastest", "Open vulnerabilities whose exploit chance went up most in the last month (FIRST EPSS)",
         risingTable(), null)}

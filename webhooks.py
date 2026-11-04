@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 from aiohttp import ClientSession, ClientTimeout
 
 import vulns as V
+from dbutil import batch
 
 KINDS = {"rocketchat": "Rocket.Chat", "slack": "Slack", "teams": "Microsoft Teams",
          "discord": "Discord", "json": "Plain JSON"}
@@ -94,7 +95,7 @@ def facts(v):
         out.append(("Fixes", f"{v['cveCount']} CVEs"))
     else:
         out.append(("Severity", V.severity_text(v["cvss"]) or "Not scored yet"))
-        out.append(("Exploited", f"Yes (CISA, {V.short_date(v['kevLast'])})" if v["exploited"] else "Not confirmed"))
+        out.append(("Exploited", f"Yes ({v.get('exploitedBy') or 'CISA'}, {V.short_date(v['kevLast'])})" if v["exploited"] else "Not confirmed"))
     if not v["usnPrimary"]:
         out.append(("Public exploit", {"metasploit": "Yes, Metasploit module", "exploitdb": "Yes, Exploit-DB",
                                        "poc": "Proof-of-concept on GitHub"}.get(v.get("exploit"), "None known")))
@@ -163,11 +164,16 @@ def payload(kind, event, v, extra, link, name="Heads Up"):
             "status": extra if event == "status" else None}
 
 
+SUMMARY_LINES = 15
+
+
 def summary_payload(kind, events, base_url, name="Heads Up"):
-    lines = []
-    for event, v, _extra in events:
-        lines.append((event, v, f"{base_url}/#{v['id']}"))
-    head = f"🛡️ {len(events)} new alerts"
+    # Act now first; at most SUMMARY_LINES lines, so chat services accept the message.
+    order = {"act": 0, "soon": 1, "updated": 2, "status": 3}
+    ranked = sorted(events, key=lambda e: order.get(e[0], 9))
+    lines = [(event, v, f"{base_url}/#{v['id']}") for event, v, _extra in ranked[:SUMMARY_LINES]]
+    more = len(events) - len(lines)
+    head = f"🛡️ {len(events)} new alerts" + (f" (showing {len(lines)}; open Heads Up for the rest)" if more else "")
     if kind in ("rocketchat", "slack"):
         text = "\n".join(f"{ICONS[e]} {EVENTS[e]}: <{l}|{v['title']}>" for e, v, l in lines)
         return {"text": f"*{head}*\n{text}"}
@@ -386,21 +392,22 @@ class Webhooks:
         seen = {r["id"]: r for r in self.db.execute("SELECT * FROM vuln_seen")}
         baseline = record_only or not seen
         events, t = [], time.time()
-        for v in vulns:
-            prev = seen.get(v["id"])
-            g = v["group"]
-            if not baseline:
-                if prev is None:
-                    if g in ("act", "soon"):
-                        events.append((g, v, None))
-                elif prev["grp"] != g:
-                    if g == "act" or (g == "soon" and prev["grp"] == "aware"):
-                        events.append((g, v, None))
-                elif (g in ("act", "soon") and v["zwChanged"] and prev["zw_changed"]
-                      and v["zwChanged"] > prev["zw_changed"]):
-                    events.append(("updated", v, None))
-            self.db.execute("INSERT INTO vuln_seen VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET grp=excluded.grp,"
-                            " zw_changed=excluded.zw_changed", (v["id"], g, v["zwChanged"], prev["first_seen"] if prev else t))
+        with batch(self.db):
+            for v in vulns:
+                prev = seen.get(v["id"])
+                g = v["group"]
+                if not baseline:
+                    if prev is None:
+                        if g in ("act", "soon"):
+                            events.append((g, v, None))
+                    elif prev["grp"] != g:
+                        if g == "act" or (g == "soon" and prev["grp"] == "aware"):
+                            events.append((g, v, None))
+                    elif (g in ("act", "soon") and v["zwChanged"] and prev["zw_changed"]
+                          and v["zwChanged"] > prev["zw_changed"]):
+                        events.append(("updated", v, None))
+                self.db.execute("INSERT INTO vuln_seen VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET grp=excluded.grp,"
+                                " zw_changed=excluded.zw_changed", (v["id"], g, v["zwChanged"], prev["first_seen"] if prev else t))
         if baseline and not seen:
             log(f"webhooks: recorded {len(vulns)} vulnerabilities as already known (no alerts on first run)")
         return events

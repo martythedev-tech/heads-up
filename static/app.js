@@ -11,6 +11,7 @@ const SOURCES = {
   cf: { name: "Cloudflare", what: "Expert write-ups of the most important internet-facing vulnerabilities, with what to do.", feeds: ["zerowire"], url: "https://radar.cloudflare.com/security/zero-wire", stale: 2 * 3600 },
   cisa: { name: "CISA", what: "US government list of vulnerabilities attackers are confirmed to be using.", feeds: ["kev"], url: "https://www.cisa.gov/known-exploited-vulnerabilities-catalog", stale: 8 * 3600 },
   ubu: { name: "Ubuntu", what: "Security updates for Ubuntu and whether each release has a fix yet.", feeds: ["ubuntu", "osv"], url: "https://ubuntu.com/security/notices", stale: 3 * 3600 },
+  vc: { name: "VulnCheck KEV", what: "Exploited vulnerabilities, often earlier than CISA, with citations. Needs a free token.", feeds: ["vulncheck"], url: "https://vulncheck.com/kev", stale: 8 * 3600 },
   ms: { name: "Microsoft", what: "Patch Tuesday: Microsoft's monthly security fixes, including zero-days.", feeds: ["msrc"], url: "https://msrc.microsoft.com/update-guide", stale: 8 * 3600 },
   ex: { name: "Exploit code", what: "Public attack code: Metasploit modules, Exploit-DB and proof-of-concepts on GitHub.", feeds: ["exploits", "poc"], url: "https://www.exploit-db.com", stale: 26 * 3600 },
 };
@@ -87,8 +88,9 @@ function buildVulns() {
     v.kevs = src.kevIds.map((id) => byId.get(id)).filter(Boolean);
     v.usns = src.usnIds.map((id) => byId.get(id)).filter(Boolean);
     v.ms = (src.msIds || []).map((id) => byId.get(id)).filter(Boolean);
+    v.vcs = (src.vcIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.cveList = v.primary.cves || [];
-    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms].filter(Boolean);
+    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms, ...v.vcs].filter(Boolean);
     v.isNew = v.items.some(isNew);
     v.done = v.group === "done";
     v.why = src.why.map(([t, bold]) => (bold ? `<b>${esc(t)}</b>` : esc(t))).join("");
@@ -109,6 +111,8 @@ function badges(v) {
   const b = [];
   if (v.zw) b.push(`<span class="badge cf">Cloudflare <span class="detail">briefing</span></span>`);
   if (v.cveList.some((c) => c.kev)) b.push(`<span class="badge cisa">CISA <span class="detail">exploited</span></span>`);
+  const onCisa = v.cveList.some((c) => c.kev), onVc = v.cveList.some((c) => c.vulncheck);
+  if (onVc && (!onCisa || v.vcLeadDays)) b.push(`<span class="badge vc">VulnCheck KEV <span class="detail">${onCisa ? `${v.vcLeadDays} d before CISA` : "exploited"}</span></span>`);
   if (v.microsoft) b.push(`<span class="badge ms">Microsoft <span class="detail">${v.microsoft.exploited ? "zero-day, fixed" : v.microsoft.disclosed ? "disclosed, fixed" : "fix out"}</span></span>`);
   if (v.exploit) b.push(`<span class="badge ex">${{ metasploit: "Metasploit", exploitdb: "Exploit-DB", poc: "GitHub" }[v.exploit]} <span class="detail">${v.exploit === "poc" ? "proof of concept" : "exploit"}</span></span>`);
   if (v.ubuntu.fixed.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix out</span></span>`);
@@ -282,6 +286,24 @@ function sparkline(series, w = 84, h = 22) {
   return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="exploit chance over 30 days"><polyline points="${pts}"/><circle cx="${last[0]}" cy="${last[1]}" r="2.5"/></svg>`;
 }
 
+function vcBox(v) {
+  const rows = v.cveList.filter((c) => c.vulncheck);
+  if (!rows.length) return "";
+  return `<div class="box src-vc"><h4><span class="badge vc">VulnCheck KEV</span> known exploited</h4>
+    ${rows.slice(0, 6).map((c) => {
+      const x = c.vulncheck;
+      const lead = x.cisaAdded && x.added && x.added < x.cisaAdded ? Math.round((new Date(x.cisaAdded) - new Date(x.added)) / 86400000) : null;
+      return `<div class="kv">
+        <span class="k">Vulnerability</span><span><a class="mono" href="https://vulncheck.com/browse/cve/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a></span>
+        <span class="k">Added by VulnCheck</span><span>${esc(day(x.added))}${lead ? ` · <b>${lead} days before CISA</b>` : x.cisaAdded ? "" : " · <b>not on CISA's list</b>"}</span>
+        ${x.ransomware === "Known" ? `<span class="k">Used in ransomware</span><span><b class="v crit">Yes</b></span>` : ""}
+        ${x.canary ? `<span class="k">Seen by VulnCheck</span><span>Their own honeypots caught it being exploited</span>` : ""}
+        ${x.reports.length ? `<span class="k">Reports of attacks</span><span><ul class="small plain">${x.reports.map((r) => `<li><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 70))}</a> <span class="muted">${esc(day(r.date))}</span></li>`).join("")}</ul></span>` : ""}
+        ${x.xdb.length ? `<span class="k">Exploit code (VulnCheck XDB)</span><span>${x.xdb.map((e) => `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.type || "exploit")}</a>`).join(", ")}</span>` : ""}
+      </div>`;
+    }).join(`<hr class="sep">`)}</div>`;
+}
+
 function msBox(v) {
   const rows = v.cveList.filter((c) => c.msrc);
   if (!rows.length) return "";
@@ -356,7 +378,7 @@ function renderDrawer(id, keepScroll) {
       <h3>${esc(v.title)}</h3>
       <p class="d-why">${v.why}</p>
     </div>
-    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${msBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
+    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${vcBox(v)}${msBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
   drawer.hidden = false;
   $("#scrim").hidden = false;
   if (keepScroll) drawer.scrollTop = scroll;
@@ -606,6 +628,44 @@ function radarBox() {
   </form>`;
 }
 
+function vulncheckBox() {
+  const r = settingsData?.vulncheck;
+  if (!r) return "";
+  const status = r.configured
+    ? (r.error && !r.okAt ? `<span class="bad-text">Turned on, but the last update failed: ${esc(r.error)}</span>` : `<span class="ok-text">On</span>${r.okAt ? ` · ${fmtNum(r.count)} exploited CVEs · updated ${ago(r.okAt)}` : " · first download running"}`)
+    : `<span class="muted">Off</span>`;
+  return `<form class="box hook-form" id="vc-form">
+    <h4><span class="badge vc">VulnCheck KEV</span> exploited list · ${status}</h4>
+    <p class="small muted">Adds vulnerabilities VulnCheck has seen exploited that aren't on CISA's list yet, and shows when VulnCheck knew first. It needs a free VulnCheck Community token:</p>
+    <ol class="small steps">
+      <li>Sign up free at <b>console.vulncheck.com</b> (Community plan).</li>
+      <li>Open your avatar → <b>Settings</b> → <b>API Tokens</b> → <b>Create token</b>, name it “Heads Up”.</li>
+      <li>Copy the token and paste it here.</li>
+    </ol>
+    <label>API token<input name="token" autocomplete="off" spellcheck="false" placeholder="${r.configured ? "Leave empty to keep the current token" : "Paste the token"}"></label>
+    <p class="err" id="vc-err"></p>
+    <div class="actions">${r.configured ? `<button type="button" class="ghost danger" id="vc-remove">Turn off</button>` : ""}<button class="primary">${r.configured ? "Replace token" : "Turn on"}</button></div>
+  </form>`;
+}
+const fmtNum = (n) => (n == null ? "" : Number(n).toLocaleString());
+
+function wireVulncheckBox() {
+  const f = $("#vc-form");
+  if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    if (!f.token.value.trim()) { $("#vc-err").textContent = "Paste the token first"; return; }
+    $("#vc-err").textContent = "Checking the token with VulnCheck…";
+    const r = await post("/api/settings/vulncheck", { token: f.token.value.trim() });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $("#vc-err").textContent = j.error || "Couldn't save it"; return; }
+    toast("VulnCheck KEV is on. The first download takes a minute");
+    await loadUsers();
+  };
+  const rm = $("#vc-remove");
+  if (rm) rm.onclick = async () => { await post("/api/settings/vulncheck", { remove: true }); toast("VulnCheck KEV turned off"); await loadUsers(); };
+}
+
 function wireRadarBox() {
   const f = $("#radar-form");
   if (!f) return;
@@ -679,7 +739,7 @@ function renderAccount() {
       ${revealBox()}
       ${userForm ? userFormBox(userForm) : ""}
       ${users}
-      ${u.role === "admin" ? radarBox() : ""}
+      ${u.role === "admin" ? radarBox() + vulncheckBox() : ""}
       <form class="box hook-form" id="pw-form">
         <h4>Change your password</h4>
         <label>Current password<input name="current" type="password" autocomplete="current-password" required></label>
@@ -695,6 +755,7 @@ function renderAccount() {
   $("#d-close").onclick = closeDrawer;
   $("#signout").onclick = async () => { await post("/api/logout", {}); closeDrawer(); await load(); toast("Signed out"); };
   wireRadarBox();
+  wireVulncheckBox();
   const add = $("#user-add");
   if (add) add.onclick = () => { userForm = {}; revealed = null; renderAccount(); $("#user-form").username.focus(); };
   const copy = $("#pw-copy");

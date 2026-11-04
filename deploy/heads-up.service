@@ -36,7 +36,8 @@ RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
-MemoryMax=400M
+MemoryHigh=800M
+MemoryMax=1G
 
 Restart=on-failure
 RestartSec=5

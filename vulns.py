@@ -69,7 +69,7 @@ def build(items, releases):
     out, by_cve = [], {}
 
     def base(p):
-        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "usnPrimary": False}
+        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "usnPrimary": False}
 
     def add(v):
         out.append(v)
@@ -89,6 +89,15 @@ def build(items, releases):
             else:
                 v = base(it)
                 v["kevs"] = [it]
+                add(v)
+    for it in items:
+        if it["source"] == "vulncheck":
+            cve = it["cves"][0]["id"] if it["cves"] else None
+            if cve in by_cve:
+                by_cve[cve]["vcs"].append(it)
+            else:
+                v = base(it)
+                v["vcs"] = [it]
                 add(v)
     for it in items:
         if it["source"] == "msrc":
@@ -128,9 +137,14 @@ def describe(v, releases, today):
     ms_exploited = sorted(m["releaseLabel"] for m in ms_info if m["exploited"])
     ms_disclosed = any(m["disclosed"] for m in ms_info)
     ms_dates = sorted(i["published"] for i in v["ms"] if i.get("extra", {}).get("exploited") and i.get("published"))
-    exploited = bool(kev_dates) or bool(ms_exploited)
-    kev_last = kev_dates[-1] if kev_dates else (ms_dates[-1] if ms_dates else None)
-    exploited_by = "CISA" if kev_dates else "Microsoft" if ms_exploited else None
+    vc_dates = sorted(c["vulncheck"]["added"] for c in cves if c.get("vulncheck") and c["vulncheck"].get("added"))
+    exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates)
+    kev_last = kev_dates[-1] if kev_dates else (vc_dates[-1] if vc_dates else (ms_dates[-1] if ms_dates else None))
+    exploited_by = "CISA" if kev_dates else "VulnCheck" if vc_dates else "Microsoft" if ms_exploited else None
+    # how many days VulnCheck listed it before CISA did
+    vc_lead = None
+    if kev_dates and vc_dates and vc_dates[0] < kev_dates[0]:
+        vc_lead = (datetime.fromisoformat(kev_dates[0][:10]) - datetime.fromisoformat(vc_dates[0][:10])).days
     # public exploit code, strongest first
     n_msf = sum(len(c.get("msf") or []) for c in cves)
     n_edb = sum(len(c.get("edb") or []) for c in cves)
@@ -159,6 +173,9 @@ def describe(v, releases, today):
         title, desc = zw["title"], zw["summary"]
     elif v["usnPrimary"]:
         title, desc = p["title"], p["summary"]
+    elif p["source"] == "vulncheck":
+        title = f"{p['title']}: {kev_short(p)}"
+        desc = str(p.get("summary") or "")
     elif p["source"] == "msrc":
         title = f"{(p.get('tags') or ['Microsoft'])[0]}: {p['title']}"
         desc = p["summary"]
@@ -174,8 +191,17 @@ def describe(v, releases, today):
     recent_kev = exploited and kev_last >= (today - timedelta(days=14)).isoformat()
     cf_urgent = bool(zw) and zw.get("category") == "Needs attention"
     prio = p.get("category") if v["usnPrimary"] else None
+    # VulnCheck-only items (CISA and Microsoft don't confirm them) need a strong
+    # signal for Act now; otherwise they wait in For awareness.
+    vc_only = bool(vc_dates) and not kev_dates and not ms_exploited
+    years = [int(c["id"].split("-")[1]) for c in cves if c["id"].count("-") >= 2 and c["id"].split("-")[1].isdigit()]
+    old_cve = bool(years) and max(years) < today.year - 1
+    vc_strong = (any((c.get("vulncheck") or {}).get("canary") for c in cves)
+                 or exploit in ("metasploit", "exploitdb") or (cvss or 0) >= 9 or bool(zw) or bool(ms_info))
     if done:
         group = "done"
+    elif vc_only and not (vc_strong and recent_kev and not old_cve):
+        group = "aware"
     elif exploited and (cf_urgent or recent_kev):
         group = "act"
     elif exploited:
@@ -192,6 +218,11 @@ def describe(v, releases, today):
         why += [["Marked ", False], [STATE_LABEL[triage["state"]], True], [f" by {triage['by']}.", False]]
     elif exploited:
         why += [["Attackers are using this", True], [f", confirmed by {exploited_by} on {short_date(kev_last)}.", False]]
+        if exploited_by == "VulnCheck":
+            why += [[" Not on CISA's list yet.", False]]
+            if group == "aware":
+                product = v["vcs"][0]["title"] if v["vcs"] else "it"
+                why += [[f" Check whether you run {product}." + (" (An older CVE, only recently reported as exploited.)" if old_cve else ""), False]]
         if zw:
             why += [[" Cloudflare says: ", False], [zw.get("headline") or "", True], [".", False]]
         if not recent_kev and not cf_urgent:
@@ -221,7 +252,8 @@ def describe(v, releases, today):
         elif ubuntu["pending"]:
             why += [[" Ubuntu fix still pending.", False]]
 
-    reported = [s for s, on in (("Cloudflare", bool(zw)), ("CISA", bool(kev_dates)), ("Microsoft", bool(ms_info)),
+    reported = [s for s, on in (("Cloudflare", bool(zw)), ("CISA", bool(kev_dates)), ("VulnCheck", bool(vc_dates)),
+                                ("Microsoft", bool(ms_info)),
                                 ("Ubuntu", bool(ubuntu["fixed"] or ubuntu["pending"]))) if on]
     return {
         "id": v["id"], "group": group, "title": title, "desc": desc, "why": why,
@@ -235,9 +267,10 @@ def describe(v, releases, today):
         "zwLatest": ((zw.get("extra") or {}).get("chronology") or [None])[0] if zw else None,
         "kevIds": [k["id"] for k in v["kevs"]], "usnIds": [u["id"] for u in v["usns"]],
         "msIds": [m["id"] for m in v["ms"]], "exploitedBy": exploited_by,
+        "vcIds": [x["id"] for x in v["vcs"]], "vcLeadDays": vc_lead,
         "microsoft": ms_info[0] if ms_info else None,
         "latest": _max([i.get("updated") or i.get("published") for i in
-                        [zw, *v["kevs"], *v["usns"], *v["ms"]] if i]) or "",
+                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"]] if i]) or "",
         "triage": triage,
     }
 

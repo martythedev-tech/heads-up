@@ -29,13 +29,15 @@ from pathlib import Path
 from aiohttp import ClientSession, ClientTimeout, web
 
 import charts as C
+from dbutil import batch
 import exploits as X
 import msrc as MS
+import vulncheck as VC
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -111,6 +113,10 @@ def db_open():
     db = sqlite3.connect(STATE / "heads-up.db", isolation_level=None)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
+    # With WAL, NORMAL syncs to disk at checkpoints instead of on every
+    # commit: still crash-safe, far fewer waits on a slow disk.
+    db.execute("PRAGMA synchronous=NORMAL")
+    db.execute("PRAGMA busy_timeout=5000")
     # 0.3 sessions belonged to the shared password; accounts replace them.
     cols = [r[1] for r in db.execute("PRAGMA table_info(sessions)")]
     if cols and "username" not in cols:
@@ -121,6 +127,7 @@ def db_open():
     db.executescript(C.RADAR_SCHEMA)
     X.migrate(db)
     MS.migrate(db)
+    VC.migrate(db)
     return db
 
 
@@ -234,6 +241,7 @@ class Fetcher:
         self.last_run = {}
         self.after_refresh = None
         self.radar_token = lambda: None
+        self.vulncheck_token = lambda: None
         self.on_patch_tuesday = None
         self.rounds = 0
 
@@ -266,6 +274,7 @@ class Fetcher:
                     ("ubuntu", 60 * 60, self.ubuntu),
                     ("exploits", 24 * 3600, self.exploits),
                     ("msrc", 6 * 3600, self.msrc),
+                    ("vulncheck", 6 * 3600, self.vulncheck),
                     ("enrich", 60 * 60, self.enrich),
                     ("radar", 60 * 60, self.radar)]
             for name, every, job in jobs:
@@ -286,78 +295,78 @@ class Fetcher:
 
     async def zero_wire(self):
         root = ET.fromstring(await self.get(ZERO_WIRE_RSS))
-        ids = []
-        for it in root.iter("item"):
-            link = it.findtext("link") or ""
-            slug = link.rstrip("/").rsplit("/", 1)[-1]
-            guid = it.findtext("guid") or slug
-            raw = it.findtext("content:encoded", namespaces=NS) or ""
-            cats = it.findall("category")
-            category = next((c.text for c in cats if c.text in ("Needs attention", "Reference")), "")
-            tags = [c.text for c in cats if c.get("domain")]
-            cves = sorted({c.text for c in cats if c.text and CVE_RE.fullmatch(c.text)}
-                          | set(CVE_RE.findall(raw)))
-            body = sanitize(raw)
-            m = re.match(r"<p><strong>(.*?)</strong>.*?Last checked <time datetime=\"([^\"]+)\"", body)
-            headline, checked = (m.group(1), m.group(2)) if m else ("", "")
-            # Drop the status line from the body; the dashboard shows it itself.
-            body = re.sub(r"^<p><strong>.*?</p>", "", body, count=1)
-            chronology = re.findall(r"<li><time datetime=\"([^\"]+)\">.*?</time>:\s*(.*?)</li>",
-                                    body.split("<h2>What happened</h2>")[0])
-            published = it.findtext("pubDate")
-            try:
-                published = parsedate_to_datetime(published).date().isoformat()
-            except (TypeError, ValueError):
-                pass
-            item_id = f"zw:{slug}"
-            ids.append(item_id)
-            upsert_item(self.db, {
-                "id": item_id, "source": "zerowire", "title": it.findtext("title"), "link": link,
-                "published": published, "updated": checked or published, "category": category,
-                "headline": headline,
-                "summary": re.sub(rf"^{re.escape(headline)}\.\s*", "", strip_tags(it.findtext("description") or "")),
-                "body": body, "cves": cves, "tags": tags, "fingerprint": guid,
-                "extra": {"chronology": [{"date": d, "text": strip_tags(t)} for d, t in chronology][:8],
-                          "author": it.findtext("dc:creator", namespaces=NS)},
-            })
-        retire_missing(self.db, "zerowire", ids)
-        source_ok(self.db, "zerowire", len(ids))
+        with batch(self.db):
+            ids = []
+            for it in root.iter("item"):
+                link = it.findtext("link") or ""
+                slug = link.rstrip("/").rsplit("/", 1)[-1]
+                guid = it.findtext("guid") or slug
+                raw = it.findtext("content:encoded", namespaces=NS) or ""
+                cats = it.findall("category")
+                category = next((c.text for c in cats if c.text in ("Needs attention", "Reference")), "")
+                tags = [c.text for c in cats if c.get("domain")]
+                cves = sorted({c.text for c in cats if c.text and CVE_RE.fullmatch(c.text)}
+                              | set(CVE_RE.findall(raw)))
+                body = sanitize(raw)
+                m = re.match(r"<p><strong>(.*?)</strong>.*?Last checked <time datetime=\"([^\"]+)\"", body)
+                headline, checked = (m.group(1), m.group(2)) if m else ("", "")
+                # Drop the status line from the body; the dashboard shows it itself.
+                body = re.sub(r"^<p><strong>.*?</p>", "", body, count=1)
+                chronology = re.findall(r"<li><time datetime=\"([^\"]+)\">.*?</time>:\s*(.*?)</li>",
+                                        body.split("<h2>What happened</h2>")[0])
+                published = it.findtext("pubDate")
+                try:
+                    published = parsedate_to_datetime(published).date().isoformat()
+                except (TypeError, ValueError):
+                    pass
+                item_id = f"zw:{slug}"
+                ids.append(item_id)
+                upsert_item(self.db, {
+                    "id": item_id, "source": "zerowire", "title": it.findtext("title"), "link": link,
+                    "published": published, "updated": checked or published, "category": category,
+                    "headline": headline,
+                    "summary": re.sub(rf"^{re.escape(headline)}\.\s*", "", strip_tags(it.findtext("description") or "")),
+                    "body": body, "cves": cves, "tags": tags, "fingerprint": guid,
+                    "extra": {"chronology": [{"date": d, "text": strip_tags(t)} for d, t in chronology][:8],
+                              "author": it.findtext("dc:creator", namespaces=NS)},
+                })
+            retire_missing(self.db, "zerowire", ids)
+            source_ok(self.db, "zerowire", len(ids))
 
     async def kev(self):
         data = await self.get(KEV_JSON, as_json=True)
         vulns = data["vulnerabilities"]
-        self.db.execute("BEGIN")
-        self.db.execute("DELETE FROM kev")
-        self.db.executemany(
-            "INSERT OR REPLACE INTO kev VALUES(?,?,?,?,?,?,?,?,?,?)",
-            [(v["cveID"], v.get("vendorProject"), v.get("product"), v.get("vulnerabilityName"),
-              v.get("dateAdded"), v.get("dueDate"), v.get("knownRansomwareCampaignUse"),
-              v.get("shortDescription"), v.get("requiredAction"), json.dumps(v.get("cwes") or []))
-             for v in vulns])
-        self.db.execute("COMMIT")
-        since = (datetime.now(timezone.utc) - timedelta(days=KEV_WINDOW_DAYS)).date().isoformat()
-        ids = []
-        for v in vulns:
-            if (v.get("dateAdded") or "") < since:
-                continue
-            item_id = f"kev:{v['cveID']}"
-            ids.append(item_id)
-            upsert_item(self.db, {
-                "id": item_id, "source": "kev",
-                "title": kev_title(v.get("vendorProject") or "", v.get("product") or ""),
-                "link": f"https://nvd.nist.gov/vuln/detail/{v['cveID']}",
-                "published": v.get("dateAdded"), "updated": v.get("dateAdded"),
-                "category": "Known exploited", "headline": v.get("vulnerabilityName"),
-                "summary": v.get("shortDescription"), "cves": [v["cveID"]],
-                "tags": [t for t in ([v.get("vendorProject")] + (v.get("cwes") or [])) if t],
-                "fingerprint": f"{v.get('dateAdded')}|{v.get('dueDate')}|{v.get('knownRansomwareCampaignUse')}",
-                "extra": {"due": v.get("dueDate"), "ransomware": v.get("knownRansomwareCampaignUse"),
-                          "action": v.get("requiredAction"),
-                          "notes": [n.strip() for n in (v.get("notes") or "").split(";")
-                                    if n.strip().startswith("https://")][:6]},
-            })
-        retire_missing(self.db, "kev", ids)
-        source_ok(self.db, "kev", len(vulns))
+        with batch(self.db):
+            self.db.execute("DELETE FROM kev")
+            self.db.executemany(
+                "INSERT OR REPLACE INTO kev VALUES(?,?,?,?,?,?,?,?,?,?)",
+                [(v["cveID"], v.get("vendorProject"), v.get("product"), v.get("vulnerabilityName"),
+                  v.get("dateAdded"), v.get("dueDate"), v.get("knownRansomwareCampaignUse"),
+                  v.get("shortDescription"), v.get("requiredAction"), json.dumps(v.get("cwes") or []))
+                 for v in vulns])
+            since = (datetime.now(timezone.utc) - timedelta(days=KEV_WINDOW_DAYS)).date().isoformat()
+            ids = []
+            for v in vulns:
+                if (v.get("dateAdded") or "") < since:
+                    continue
+                item_id = f"kev:{v['cveID']}"
+                ids.append(item_id)
+                upsert_item(self.db, {
+                    "id": item_id, "source": "kev",
+                    "title": kev_title(v.get("vendorProject") or "", v.get("product") or ""),
+                    "link": f"https://nvd.nist.gov/vuln/detail/{v['cveID']}",
+                    "published": v.get("dateAdded"), "updated": v.get("dateAdded"),
+                    "category": "Known exploited", "headline": v.get("vulnerabilityName"),
+                    "summary": v.get("shortDescription"), "cves": [v["cveID"]],
+                    "tags": [t for t in ([v.get("vendorProject")] + (v.get("cwes") or [])) if t],
+                    "fingerprint": f"{v.get('dateAdded')}|{v.get('dueDate')}|{v.get('knownRansomwareCampaignUse')}",
+                    "extra": {"due": v.get("dueDate"), "ransomware": v.get("knownRansomwareCampaignUse"),
+                              "action": v.get("requiredAction"),
+                              "notes": [n.strip() for n in (v.get("notes") or "").split(";")
+                                        if n.strip().startswith("https://")][:6]},
+                })
+            retire_missing(self.db, "kev", ids)
+            source_ok(self.db, "kev", len(vulns))
 
     async def ubuntu(self):
         since = datetime.now(timezone.utc) - timedelta(days=USN_WINDOW_DAYS)
@@ -365,47 +374,64 @@ class Fetcher:
         while offset < 600:  # the API returns at most 20 per page
             page = await self.get(USN_JSON, params={"limit": 20, "offset": offset,
                                                      "order": "newest"}, as_json=True)
-            batch = page.get("notices") or []
-            notices += batch
-            if not batch or (batch[-1].get("published") or "")[:10] < since.date().isoformat():
+            page_items = page.get("notices") or []
+            notices += page_items
+            if not page_items or (page_items[-1].get("published") or "")[:10] < since.date().isoformat():
                 break
             offset += 20
             await asyncio.sleep(1)
-        ids = []
-        for n in notices:
-            if (n.get("published") or "")[:10] < since.date().isoformat():
-                continue
-            releases = [r.get("codename") for r in n.get("releases") or []]
-            if UBUNTU_RELEASES and not set(releases) & set(UBUNTU_RELEASES):
-                continue
-            cves = n.get("cves_ids") or [c.get("id") for c in n.get("cves") or [] if isinstance(c, dict)]
-            cves = [c for c in cves if CVE_RE.fullmatch(c or "")]
-            item_id = f"usn:{n['id']}"
-            ids.append(item_id)
-            upsert_item(self.db, {
-                "id": item_id, "source": "ubuntu", "title": n.get("title"),
-                "link": f"https://ubuntu.com/security/notices/{n['id']}",
-                "published": (n.get("published") or "")[:10], "updated": (n.get("published") or "")[:10],
-                "category": "", "headline": n["id"], "summary": strip_tags(n.get("summary") or ""),
-                "body": sanitize("<p>" + escape(n.get("description") or "").replace("\n\n", "</p><p>") + "</p>"),
-                "cves": sorted(set(cves)), "tags": sorted(set(n.get("release_packages") or {}) & set(releases)),
-                "fingerprint": n.get("published") or n["id"],
-                "extra": {"releases": [r for r in releases if r in UBUNTU_RELEASES] or releases,
-                          "packages": sorted({p.get("name") for ps in (n.get("release_packages") or {}).values()
-                                              for p in ps if p.get("name")})[:12],
-                          "instructions": strip_tags(n.get("instructions") or "")[:400]},
-            })
-        retire_missing(self.db, "ubuntu", ids)
-        source_ok(self.db, "ubuntu", len(ids))
+        with batch(self.db):
+            ids = []
+            for n in notices:
+                if (n.get("published") or "")[:10] < since.date().isoformat():
+                    continue
+                releases = [r.get("codename") for r in n.get("releases") or []]
+                if UBUNTU_RELEASES and not set(releases) & set(UBUNTU_RELEASES):
+                    continue
+                cves = n.get("cves_ids") or [c.get("id") for c in n.get("cves") or [] if isinstance(c, dict)]
+                cves = [c for c in cves if CVE_RE.fullmatch(c or "")]
+                item_id = f"usn:{n['id']}"
+                ids.append(item_id)
+                upsert_item(self.db, {
+                    "id": item_id, "source": "ubuntu", "title": n.get("title"),
+                    "link": f"https://ubuntu.com/security/notices/{n['id']}",
+                    "published": (n.get("published") or "")[:10], "updated": (n.get("published") or "")[:10],
+                    "category": "", "headline": n["id"], "summary": strip_tags(n.get("summary") or ""),
+                    "body": sanitize("<p>" + escape(n.get("description") or "").replace("\n\n", "</p><p>") + "</p>"),
+                    "cves": sorted(set(cves)), "tags": sorted(set(n.get("release_packages") or {}) & set(releases)),
+                    "fingerprint": n.get("published") or n["id"],
+                    "extra": {"releases": [r for r in releases if r in UBUNTU_RELEASES] or releases,
+                              "packages": sorted({p.get("name") for ps in (n.get("release_packages") or {}).values()
+                                                  for p in ps if p.get("name")})[:12],
+                              "instructions": strip_tags(n.get("instructions") or "")[:400]},
+                })
+            retire_missing(self.db, "ubuntu", ids)
+            source_ok(self.db, "ubuntu", len(ids))
+
+    async def vulncheck(self):
+        token = self.vulncheck_token()
+        if not token:
+            return
+        n = await VC.refresh(self.db, self.session, token)
+        with batch(self.db):
+            since = (datetime.now(timezone.utc) - timedelta(days=KEV_WINDOW_DAYS)).date().isoformat()
+            cisa = {r[0] for r in self.db.execute("SELECT cve FROM kev")}
+            ids = []
+            for item in VC.items(self.db, since, cisa):
+                ids.append(item["id"])
+                upsert_item(self.db, item)
+            retire_missing(self.db, "vulncheck", ids)
+            source_ok(self.db, "vulncheck", n)
 
     async def msrc(self):
         n = await MS.refresh(self.db, self.session)
-        ids = []
-        for item in MS.zero_day_items(self.db):
-            ids.append(item["id"])
-            upsert_item(self.db, item)
-        retire_missing(self.db, "msrc", ids)
-        source_ok(self.db, "msrc", n)
+        with batch(self.db):
+            ids = []
+            for item in MS.zero_day_items(self.db):
+                ids.append(item["id"])
+                upsert_item(self.db, item)
+            retire_missing(self.db, "msrc", ids)
+            source_ok(self.db, "msrc", n)
         if self.on_patch_tuesday:
             await self.on_patch_tuesday()
 
@@ -435,8 +461,8 @@ class Fetcher:
         everything = sorted(everything)
         marks_all = ",".join("?" * len(everything)) or "''"
         marks_detailed = ",".join("?" * len(detailed)) or "''"
-        for c in everything:
-            self.db.execute("INSERT OR IGNORE INTO cve(id) VALUES(?)", (c,))
+        with batch(self.db):
+            self.db.executemany("INSERT OR IGNORE INTO cve(id) VALUES(?)", [(c,) for c in everything])
         # EPSS: cheap, batched, daily.
         stale = [r["id"] for r in self.db.execute(
             f"SELECT id FROM cve WHERE id IN ({marks_all})"
@@ -445,10 +471,10 @@ class Fetcher:
             chunk = stale[i:i + 80]
             data = await self.get(EPSS, params={"cve": ",".join(chunk)}, as_json=True)
             got = {d["cve"]: d for d in data.get("data") or []}
-            for c in chunk:
-                d = got.get(c)
-                self.db.execute("UPDATE cve SET epss=?, epss_pct=?, epss_at=? WHERE id=?",
-                                (float(d["epss"]) if d else None, float(d["percentile"]) if d else None, now(), c))
+            with batch(self.db):
+                self.db.executemany("UPDATE cve SET epss=?, epss_pct=?, epss_at=? WHERE id=?",
+                                    [(float(got[c]["epss"]) if c in got else None,
+                                      float(got[c]["percentile"]) if c in got else None, now(), c) for c in chunk])
         source_ok(self.db, "epss", len(everything))
         # Exploit-chance history and GitHub proof-of-concept repos, for the
         # CVEs in briefings and CISA items (not every CVE in an Ubuntu notice).
@@ -469,8 +495,11 @@ class Fetcher:
 
         async def one(c):
             async with sem:
-                await self.osv_priority(c)
-        await asyncio.gather(*(one(c) for c in todo if c not in detailed))
+                return c, await self.osv_priority(c)
+        results = await asyncio.gather(*(one(c) for c in todo if c not in detailed))
+        with batch(self.db):
+            self.db.executemany("UPDATE cve SET ubuntu_priority=?, ubuntu_at=? WHERE id=?",
+                                [(prio, now(), c) for c, prio in results if prio is not False])
         if todo:
             source_ok(self.db, "osv", len(todo))
         # NVD + Ubuntu tracker: per CVE, only for briefings and KEV items. NVD
@@ -523,14 +552,14 @@ class Fetcher:
                 if r.status == 404:
                     prio = "not-in-ubuntu"
                 elif r.status != 200:
-                    return
+                    return False
                 else:
                     d = await r.json(content_type=None)
                     prio = next((s["score"] for s in d.get("severity") or [] if s.get("type") == "Ubuntu"), None)
         except Exception as e:
             log(f"[osv] {cve_id}: {e!r}")
-            return
-        self.db.execute("UPDATE cve SET ubuntu_priority=?, ubuntu_at=? WHERE id=?", (prio, now(), cve_id))
+            return False
+        return prio
 
     async def ubuntu_one(self, cve_id):
         """True when the tracker answered (found or not), False when it failed."""
@@ -663,6 +692,8 @@ def build_state(db):
         }
     for cve_id, info in MS.cve_info(db, cves).items():
         cves[cve_id]["msrc"] = info
+    for cve_id, info in VC.cve_info(db, cves).items():
+        cves[cve_id]["vulncheck"] = info
     for cve_id, ex in X.exploit_rows(db, cves).items():
         cves[cve_id]["edb"] = ex["edb"][:5]
         cves[cve_id]["msf"] = ex["msf"][:5]
@@ -687,7 +718,8 @@ async def api_state(request):
 
 
 def compressed(request, payload):
-    resp = web.json_response(payload)
+    # zlib_executor_size: compress big bodies in a worker thread, not on the event loop
+    resp = web.Response(text=json.dumps(payload), content_type="application/json", zlib_executor_size=32768)
     if "gzip" in request.headers.get("Accept-Encoding", ""):
         resp.enable_compression()
     return resp
@@ -767,14 +799,19 @@ async def api_charts(request):
     radar, at = C.radar_data(db)
     src = db.execute("SELECT * FROM sources WHERE name='radar'").fetchone()
     out["patchTuesday"] = MS.summary(db)
+    out["vulncheck"] = VC.stats(db, datetime.now(timezone.utc).date().isoformat()) if secret_setting(request.app, "vulncheck_token") else None
     out["radar"] = {"configured": bool(radar_token(request.app)), "data": radar, "at": at,
                     "error": src["error"] if src and src["error"] and (not src["ok_at"] or src["err_at"] > src["ok_at"]) else None}
     return compressed(request, out)
 
 
 def radar_token(app):
+    return secret_setting(app, "radar_token")
+
+
+def secret_setting(app, key):
     hooks = app["hooks"]
-    row = app["db"].execute("SELECT value FROM meta WHERE key='radar_token'").fetchone()
+    row = app["db"].execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
     if not row or not hooks.box:
         return ""
     try:
@@ -785,10 +822,16 @@ def radar_token(app):
 
 async def api_settings(request):
     need_admin(request)
-    src = request.app["db"].execute("SELECT * FROM sources WHERE name='radar'").fetchone()
+    db = request.app["db"]
+    src = db.execute("SELECT * FROM sources WHERE name='radar'").fetchone()
+    vsrc = db.execute("SELECT * FROM sources WHERE name='vulncheck'").fetchone()
     return web.json_response({"radar": {"configured": bool(radar_token(request.app)),
                                         "okAt": src["ok_at"] if src else None,
                                         "error": src["error"] if src else None},
+                              "vulncheck": {"configured": bool(secret_setting(request.app, "vulncheck_token")),
+                                            "okAt": vsrc["ok_at"] if vsrc else None,
+                                            "error": vsrc["error"] if vsrc else None,
+                                            "count": vsrc["count"] if vsrc else None},
                               "canStoreSecrets": request.app["hooks"].box is not None})
 
 
@@ -816,13 +859,52 @@ async def api_settings_radar(request):
     log(f"radar token set by {admin['username']}")
 
     async def first_fetch():
-        try:
-            errors = await C.radar_refresh(app["db"], fetcher.session, token)
-            for e in errors:
-                log(f"[radar] {e}")
-            source_ok(app["db"], "radar", len(C.RADAR_QUERIES) - len(errors))
-        except Exception as e:
-            source_err(app["db"], "radar", e)
+        async with fetcher.lock:
+            try:
+                errors = await C.radar_refresh(app["db"], fetcher.session, token)
+                for e in errors:
+                    log(f"[radar] {e}")
+                source_ok(app["db"], "radar", len(C.RADAR_QUERIES) - len(errors))
+            except Exception as e:
+                source_err(app["db"], "radar", e)
+    background(app, first_fetch())
+    return web.json_response({"ok": True})
+
+
+async def api_settings_vulncheck(request):
+    admin = need_admin(request)
+    app = request.app
+    body = await request.json()
+    db = app["db"]
+    if body.get("remove"):
+        db.execute("DELETE FROM meta WHERE key='vulncheck_token'")
+        db.execute("DELETE FROM vckev")
+        retire_missing(db, "vulncheck", [])
+        db.execute("DELETE FROM sources WHERE name='vulncheck'")
+        log(f"vulncheck token removed by {admin['username']}")
+        return web.json_response({})
+    token = str(body.get("token") or "").strip()
+    if not token or len(token) > 300 or not app["hooks"].box:
+        return web.json_response({"error": "Paste the API token"}, status=400)
+    fetcher = app["fetcher"]
+    if fetcher.session is None:
+        fetcher.session = ClientSession(headers={"User-Agent": UA}, timeout=ClientTimeout(total=60))
+    try:
+        await VC.check_token(fetcher.session, token)
+    except Exception as e:
+        return web.json_response({"error": f"VulnCheck didn't accept the token: {e}"}, status=400)
+    db.execute("INSERT OR REPLACE INTO meta VALUES('vulncheck_token', ?)", (app["hooks"].box.seal(token).hex(),))
+    log(f"vulncheck token set by {admin['username']}")
+
+    async def first_fetch():
+        # Wait for any running refresh: the big downloads must not overlap
+        # (together they can exceed the service's memory limit).
+        async with fetcher.lock:
+            try:
+                await fetcher.vulncheck()
+                await notify_changes(app)
+            except Exception as e:
+                source_err(db, "vulncheck", e)
     background(app, first_fetch())
     return web.json_response({"ok": True})
 
@@ -998,10 +1080,12 @@ def make_app(db, fetcher):
     app["fresh"] = app["hooks"].is_empty()
     fetcher.after_refresh = lambda: notify_changes(app)
     fetcher.radar_token = lambda: radar_token(app)
+    fetcher.vulncheck_token = lambda: secret_setting(app, "vulncheck_token")
     fetcher.on_patch_tuesday = lambda: announce_patch_tuesday(app)
     app.router.add_get("/api/charts", api_charts)
     app.router.add_get("/api/settings", api_settings)
     app.router.add_post("/api/settings/radar", api_settings_radar)
+    app.router.add_post("/api/settings/vulncheck", api_settings_vulncheck)
     app.router.add_post("/api/me/password", api_me_password)
     app.router.add_get("/api/users", api_users)
     app.router.add_post("/api/users/create", api_user_create)

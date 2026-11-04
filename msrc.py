@@ -6,6 +6,8 @@ monthly releases are kept.
 """
 import asyncio
 import json
+
+from dbutil import batch
 import time
 from collections import Counter
 from datetime import date, timedelta
@@ -75,10 +77,9 @@ async def refresh(db, session):
         rows = await fetch_release(session, release)
         if not rows:
             continue  # not released yet (or only an "early" document)
-        db.execute("BEGIN")
-        db.execute("DELETE FROM msrc WHERE release=?", (release,))
-        db.executemany("INSERT OR REPLACE INTO msrc VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", rows)
-        db.execute("COMMIT")
+        with batch(db):
+            db.execute("DELETE FROM msrc WHERE release=?", (release,))
+            db.executemany("INSERT OR REPLACE INTO msrc VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", rows)
         total += len(rows)
     db.execute(f"DELETE FROM msrc WHERE release NOT IN ({','.join('?' * len(keep))})", keep)
     return total
