@@ -12,6 +12,7 @@ Environment=PYTHONUNBUFFERED=1
 # The sign-in hash is encrypted at rest with the host key (systemd-creds) and
 # decrypted into a private tmpfs only this service can read.
 LoadCredentialEncrypted=login-hash:/etc/credstore.encrypted/heads-up.login-hash
+LoadCredentialEncrypted=settings-key:/etc/credstore.encrypted/heads-up.settings-key
 LoadCredential=tls-key:/etc/heads-up/tls/server.key
 
 DynamicUser=yes

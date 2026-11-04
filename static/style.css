@@ -294,3 +294,29 @@ dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top
   background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: 13px;
 }
 hr.sep { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+
+/* webhooks */
+.hook-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 8px; }
+.hook-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.hook-actions .ghost { height: 28px; font-size: 12.5px; padding: 0 10px; }
+.ghost.danger { color: var(--crit); }
+.hook.off { opacity: 0.65; }
+.hook .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.chip { display: inline-flex; height: 22px; align-items: center; padding: 0 8px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); font-size: 12px; }
+.ok-text { color: var(--ok); }
+.bad-text { color: var(--crit); }
+.recent summary { cursor: pointer; color: var(--accent); font-size: 12.5px; margin-top: 6px; }
+.recent ul { list-style: none; padding: 0; margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.recent li { padding: 2px 0; }
+.add-hook { align-self: flex-start; }
+.hook-form label { display: block; font-size: 12px; color: var(--muted); margin-top: 10px; }
+.hook-form input:not([type=checkbox]), .hook-form select {
+  display: block; width: 100%; margin-top: 4px; height: 32px; border: 1px solid var(--line); border-radius: 6px;
+  padding: 0 10px; background: var(--panel-2); color: var(--text); font: inherit;
+}
+.hook-form .help { margin: 6px 0 0; color: var(--muted); }
+.hook-form fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 14px 0 0; padding: 6px 12px 10px; }
+.hook-form legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.hook-form label.ev { display: flex; gap: 10px; align-items: flex-start; color: var(--text); font-size: 13.5px; margin-top: 8px; }
+.hook-form label.ev input { margin-top: 3px; }
+.hook-form .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }

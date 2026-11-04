@@ -11,7 +11,14 @@ Anyone who can reach it can read it. Signing in (name + shared password)
 lets you mark items Untriaged / Investigating / Not affected / Patched with a
 note; every change is logged.
 
-Single-file aiohttp app (`app.py`) + static front end, SQLite state, run by
+**Webhooks** (Webhooks button, when signed in): post alerts to Rocket.Chat,
+Slack, Microsoft Teams (Workflows), Discord or any URL as JSON (optionally
+HMAC-signed). Each webhook chooses its events: new in Act now, new in Patch
+soon, Cloudflare updated its guidance, status changed. Nothing is sent for
+what already exists when the server first starts; more than four alerts at
+once arrive as one summary. Webhook URLs are stored encrypted.
+
+aiohttp app (`app.py`, grouping in `vulns.py`, alerts in `webhooks.py`) + static front end, SQLite state, run by
 systemd with a private, name-constrained CA. Deploy from the laptop with
 `deploy/deploy.sh` (`secrets` stores the sign-in password from the keyring).
 

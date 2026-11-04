@@ -76,97 +76,21 @@ function kevShort(it) {
 // --- one entry per vulnerability ----------------------------------------------------
 
 function buildVulns() {
-  const out = [];
-  const byCve = new Map();
-  const add = (v) => { out.push(v); for (const c of v.cveList) if (!byCve.has(c.id)) byCve.set(c.id, v); return v; };
-  const base = (primary) => ({ id: primary.id, primary, zw: null, kevs: [], usns: [], cveList: [] });
-
-  for (const it of data.items.filter((i) => i.source === "zerowire")) {
-    add(Object.assign(base(it), { zw: it, cveList: it.cves }));
-  }
-  for (const it of data.items.filter((i) => i.source === "kev")) {
-    const v = byCve.get(it.cves[0]?.id);
-    if (v) v.kevs.push(it);
-    else add(Object.assign(base(it), { kevs: [it], cveList: it.cves }));
-  }
-  for (const it of data.items.filter((i) => i.source === "ubuntu")) {
-    const linked = new Set();
-    for (const c of it.cves) { const v = byCve.get(c.id); if (v) linked.add(v); }
-    for (const v of linked) v.usns.push(it);
-    if (!linked.size && ["critical", "high"].includes(it.category)) {
-      out.push(Object.assign(base(it), { usns: [it], usnPrimary: true, cveList: it.cves }));
-    }
-  }
-  for (const v of out) describe(v);
-  return out;
-}
-
-function ubuntuSummary(v) {
-  const fixed = new Set(), pending = new Set();
-  for (const c of v.cveList) for (const p of c.ubuntu || []) for (const [r, st] of Object.entries(p.releases)) {
-    if (st === "released") fixed.add(r);
-    else if (["needed", "pending", "needs-triage"].includes(st)) pending.add(r);
-  }
-  for (const u of v.usns) for (const r of u.extra?.releases || []) fixed.add(r);
-  const order = (s) => data.releases.filter((r) => s.has(r)).map(rel);
-  return { fixed: order(fixed), pending: order(pending) };
-}
-
-function describe(v) {
-  const p = v.primary;
-  const cves = v.cveList;
-  const kevDates = cves.map((c) => c.kev?.added).filter(Boolean).sort();
-  v.cvss = max(cves.map((c) => c.cvss));
-  v.epss = max(cves.map((c) => c.epss));
-  v.exploited = kevDates.length > 0;
-  v.kevLast = kevDates[kevDates.length - 1];
-  v.ubuntu = ubuntuSummary(v);
-  v.items = [v.zw, ...v.kevs, ...v.usns].filter(Boolean);
-  v.isNew = v.items.some(isNew);
-  v.latest = max(v.items.map((i) => i.updated || i.published)) || "";
-  v.triage = p.triage;
-  v.done = ["patched", "not_affected"].includes(v.triage?.state);
-
-  if (v.zw) {
-    v.title = v.zw.title;
-    v.desc = v.zw.summary;
-  } else if (v.usnPrimary) {
-    v.title = p.title;
-    v.desc = p.summary;
-    v.ubuntuPriority = p.category;
-  } else {
-    v.title = `${p.title}: ${kevShort(p)}`;
-    v.desc = String(p.summary || "").replace(/^(\S+) \1 /, "$1 ");
-  }
-
-  const recentKev = v.exploited && v.kevLast >= daysAgoIso(14);
-  const cfUrgent = v.zw?.category === "Needs attention";
-  if (v.done) v.group = "done";
-  else if (v.exploited && (cfUrgent || recentKev)) v.group = "act";
-  else if (v.exploited) v.group = "aware";
-  else if (cfUrgent || (v.cvss ?? 0) >= 9 || v.ubuntuPriority === "critical" || (v.epss ?? 0) >= 0.5) v.group = "soon";
-  else v.group = "aware";
-
-  const parts = [];
-  if (v.done) {
-    parts.push(`Marked <b>${esc(STATE_LABEL[v.triage.state])}</b> by ${esc(v.triage.by)} ${ago(v.triage.at)}.`);
-  } else if (v.exploited) {
-    parts.push(`<b>Attackers are using this</b>, confirmed by CISA on ${esc(day(v.kevLast))}.`);
-    if (v.zw) parts.push(`Cloudflare says: <b>${esc(v.zw.headline)}</b>.`);
-    if (!recentKev && !cfUrgent) parts.push(`Reported over 2 weeks ago; check whether you run ${esc(v.kevs[0]?.title || "it")}.`);
-  } else if (v.zw) {
-    parts.push(`Cloudflare says: <b>${esc(v.zw.headline)}</b>.`);
-    parts.push("Not confirmed as exploited yet.");
-  } else if (v.usnPrimary) {
-    parts.push(`Ubuntu rates this <b>${esc(v.ubuntuPriority)}</b>; updates are out for ${esc(v.ubuntu.fixed.join(", ") || "supported releases")}.`);
-  } else if (v.cvss >= 9) {
-    parts.push(`<b>Critical severity</b> (${v.cvss.toFixed(1)} out of 10).`);
-  }
-  if (!v.done && !v.usnPrimary) {
-    if (v.ubuntu.fixed.length) parts.push(`Ubuntu fix out for ${esc(v.ubuntu.fixed.join(", "))}.`);
-    else if (v.ubuntu.pending.length) parts.push("Ubuntu fix still pending.");
-  }
-  v.why = parts.join(" ");
+  // Grouping happens on the server (vulns.py) so the page and the webhooks agree.
+  const byId = new Map(data.items.map((i) => [i.id, i]));
+  return data.vulns.map((src) => {
+    const v = { ...src };
+    v.primary = byId.get(src.id) || { cves: [], tags: [] };
+    v.zw = src.zwId ? byId.get(src.zwId) : null;
+    v.kevs = src.kevIds.map((id) => byId.get(id)).filter(Boolean);
+    v.usns = src.usnIds.map((id) => byId.get(id)).filter(Boolean);
+    v.cveList = v.primary.cves || [];
+    v.items = [v.zw, ...v.kevs, ...v.usns].filter(Boolean);
+    v.isNew = v.items.some(isNew);
+    v.done = v.group === "done";
+    v.why = src.why.map(([t, bold]) => (bold ? `<b>${esc(t)}</b>` : esc(t))).join("");
+    return v;
+  });
 }
 
 function matches(v) {
@@ -274,6 +198,8 @@ function render() {
   $("#account").title = data.user ? "Signed in. Click to sign out" : "Sign in to track status";
   $("#account").hidden = !data.canSignIn && !data.user;
   $("#refresh").hidden = !data.user;
+  $("#hooks-btn").hidden = !data.user || !data.webhooksAvailable;
+  if (hooksOpen && !data.user) closeDrawer();
   $("#version").textContent = `Heads Up ${data.version}`;
   if (openId) renderDrawer(openId, true);
 }
@@ -407,6 +333,7 @@ function openDrawer(id) {
 }
 function closeDrawer() {
   openId = null;
+  hooksOpen = false;
   $("#drawer").hidden = true;
   $("#scrim").hidden = true;
   history.replaceState(null, "", location.pathname);
@@ -422,6 +349,150 @@ async function saveTriage(id) {
   toast(`Marked ${STATE_LABEL[state]}`);
   render();
 }
+
+// --- webhooks -------------------------------------------------------------------------
+
+let hooksOpen = false;
+let hooksData = null;
+let editing = null;      // null = list, {} = new, {...} = editing one
+let confirmDelete = null;
+
+const KIND_HELP = {
+  rocketchat: "In Rocket.Chat: Administration → Workspace → Integrations → New → Incoming. Choose the channel, turn it on, save, then copy the Webhook URL.",
+  slack: "In Slack: create an app with Incoming Webhooks turned on, add it to a channel, then copy the webhook URL.",
+  teams: "In Teams: open the channel → ⋯ → Workflows → “Post to a channel when a webhook request is received”, then copy the URL it gives you.",
+  discord: "In Discord: Channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL.",
+  json: "Any URL that accepts a JSON POST. If you set a secret, every request carries X-HeadsUp-Signature: sha256=<HMAC-SHA256 of the body>.",
+};
+const EVENT_HELP = {
+  act: "A vulnerability appears in, or moves into, Act now (attackers are using it).",
+  soon: "A vulnerability appears in Patch soon (critical, not exploited yet).",
+  updated: "Cloudflare changes its advice on something in Act now or Patch soon.",
+  status: "Someone marks an item Investigating, Not affected or Patched.",
+};
+
+async function openHooks() {
+  openId = null;
+  hooksOpen = true;
+  editing = null;
+  history.replaceState(null, "", location.pathname);
+  await loadHooks();
+}
+
+async function loadHooks() {
+  const r = await fetch("/api/webhooks");
+  if (!r.ok) { toast("Sign in first"); return closeDrawer(); }
+  hooksData = await r.json();
+  renderHooks();
+}
+
+function deliveryText(h) {
+  if (!h.lastAt) return `<span class="muted">Nothing sent yet</span>`;
+  return h.lastOk ? `<span class="ok-text">Delivered ${ago(h.lastAt)}</span>` : `<span class="bad-text">Failed ${ago(h.lastAt)}: ${esc(h.lastDetail)}</span>`;
+}
+
+function hookCard(h) {
+  const kind = hooksData.kinds[h.kind] || h.kind;
+  const evs = h.events.map((e) => `<span class="chip">${esc(hooksData.events[e] || e)}</span>`).join("");
+  const recent = h.recent.length ? `<details class="recent"><summary>Recent deliveries</summary><ul>${h.recent.map((d) =>
+    `<li><span class="${d.ok ? "ok-text" : "bad-text"}">${d.ok ? "✓" : "✕"}</span> ${new Date(d.at * 1000).toLocaleString()} · ${esc(hooksData.events[d.event] || d.event)} · ${esc(d.title)}${d.ok ? "" : ` · ${esc(d.detail)}`}</li>`).join("")}</ul></details>` : "";
+  return `<div class="box hook ${h.enabled ? "" : "off"}">
+    <div class="hook-head"><div><b>${esc(h.name)}</b> <span class="muted small">· ${esc(kind)}${h.enabled ? "" : " · paused"}</span>
+      <div class="mono small muted">${esc(h.url)}</div></div>
+      <div class="hook-actions">
+        <button class="ghost" data-hook-test="${h.id}">Send test</button>
+        <button class="ghost" data-hook-edit="${h.id}">Edit</button>
+        <button class="ghost danger" data-hook-del="${h.id}">${confirmDelete === h.id ? "Click again to delete" : "Delete"}</button>
+      </div></div>
+    <div class="chips">${evs}</div>
+    <div class="small">${deliveryText(h)}</div>${recent}</div>`;
+}
+
+function hookForm(h) {
+  const isNew = !h.id;
+  const kind = h.kind || "rocketchat";
+  const events = h.events || hooksData.defaultEvents;
+  return `<form class="box hook-form" id="hook-form">
+    <h4>${isNew ? "Add a webhook" : `Edit “${esc(h.name)}”`}</h4>
+    <label>Name<input name="name" maxlength="60" value="${esc(h.name || "")}" placeholder="e.g. #security channel"></label>
+    <label>Type<select name="kind">${Object.entries(hooksData.kinds).map(([k, l]) => `<option value="${k}" ${k === kind ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+    <p class="help small" id="kind-help">${esc(KIND_HELP[kind])}</p>
+    <label>Webhook URL<input name="url" autocomplete="off" spellcheck="false" placeholder="${isNew ? "https://…" : "Leave empty to keep the current URL"}"></label>
+    <label class="secret-row" ${kind === "json" ? "" : "hidden"}>Signing secret (optional)<input name="secret" autocomplete="off" placeholder="${h.hasSecret ? "Leave empty to keep the current secret" : ""}"></label>
+    <fieldset><legend>Tell us when…</legend>${Object.entries(hooksData.events).map(([k, l]) =>
+      `<label class="ev"><input type="checkbox" name="ev" value="${k}" ${events.includes(k) ? "checked" : ""}><span><b>${esc(l)}</b><br><span class="muted small">${esc(EVENT_HELP[k])}</span></span></label>`).join("")}</fieldset>
+    <label class="ev"><input type="checkbox" name="enabled" ${h.enabled === false ? "" : "checked"}><span>Turned on</span></label>
+    <p class="err" id="hook-err"></p>
+    <div class="actions"><button type="button" class="ghost" id="hook-cancel">Cancel</button><button class="primary">${isNew ? "Add webhook" : "Save"}</button></div>
+  </form>`;
+}
+
+function renderHooks() {
+  const drawer = $("#drawer");
+  const list = hooksData.webhooks;
+  drawer.innerHTML = `<div class="d-head">
+      <button class="ghost d-close" id="d-close" title="Close (Esc)">✕</button>
+      <div class="d-group">Settings</div>
+      <h3>Webhooks</h3>
+      <p class="d-why">Post alerts to Rocket.Chat, Slack, Teams, Discord or any URL when something changes. Each webhook picks what it wants to hear about. Several changes at once arrive as one summary message.</p>
+    </div>
+    <div class="d-body">
+      ${hooksData.available ? "" : `<div class="box"><b>Webhooks are switched off on this server</b> (no settings key). Re-run the installer.</div>`}
+      ${editing ? hookForm(editing) : ""}
+      ${list.map(hookCard).join("") || (editing ? "" : `<div class="box empty">No webhooks yet.</div>`)}
+      ${editing || !hooksData.available ? "" : `<button class="primary add-hook" id="hook-add">Add webhook</button>`}
+    </div>`;
+  drawer.hidden = false;
+  $("#scrim").hidden = false;
+  $("#d-close").onclick = closeDrawer;
+  const add = $("#hook-add");
+  if (add) add.onclick = () => { editing = {}; renderHooks(); };
+  const form = $("#hook-form");
+  if (form) {
+    form.kind.onchange = () => {
+      $("#kind-help").textContent = KIND_HELP[form.kind.value];
+      $(".secret-row").hidden = form.kind.value !== "json";
+    };
+    $("#hook-cancel").onclick = () => { editing = null; renderHooks(); };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {
+        id: editing.id, name: form.name.value, kind: form.kind.value, url: form.url.value,
+        secret: form.secret.value, enabled: form.enabled.checked,
+        events: [...form.querySelectorAll("input[name=ev]:checked")].map((x) => x.value),
+      };
+      const r = await post("/api/webhooks/save", body);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { $("#hook-err").textContent = j.error || "Couldn't save"; return; }
+      editing = null;
+      await loadHooks();
+      toast("Saved. Use “Send test” to check it");
+    };
+    form.name.focus();
+  }
+}
+
+document.addEventListener("click", async (e) => {
+  if (!hooksOpen) return;
+  const t = e.target.closest("[data-hook-test],[data-hook-edit],[data-hook-del]");
+  if (!t) return;
+  if (t.dataset.hookEdit) { editing = { ...hooksData.webhooks.find((h) => h.id === t.dataset.hookEdit) }; return renderHooks(); }
+  if (t.dataset.hookDel) {
+    if (confirmDelete !== t.dataset.hookDel) { confirmDelete = t.dataset.hookDel; return renderHooks(); }
+    confirmDelete = null;
+    await post("/api/webhooks/delete", { id: t.dataset.hookDel });
+    toast("Webhook deleted");
+    return loadHooks();
+  }
+  if (t.dataset.hookTest) {
+    t.disabled = true;
+    t.textContent = "Sending…";
+    const r = await post("/api/webhooks/test", { id: t.dataset.hookTest });
+    const j = await r.json().catch(() => ({}));
+    toast(j.ok ? "Test delivered. Check the channel" : `Test failed: ${j.detail || j.error || r.status}`);
+    return loadHooks();
+  }
+});
 
 // --- network ------------------------------------------------------------------------
 
@@ -486,6 +557,8 @@ $("#account").onclick = async () => {
   toast("Signed out");
 };
 
+$("#hooks-btn").onclick = openHooks;
+
 $("#refresh").onclick = async () => {
   $("#refresh").classList.add("spin");
   const r = await post("/api/refresh", {});
@@ -511,9 +584,9 @@ document.addEventListener("click", (e) => {
 $("#scrim").onclick = closeDrawer;
 $("#q").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && openId) closeDrawer();
+  if (e.key === "Escape" && (openId || hooksOpen) && !$("#login").open) closeDrawer();
   if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) { e.preventDefault(); $("#q").focus(); }
 });
 
 load();
-setInterval(() => { if (!document.hidden && !$("#login").open && document.activeElement?.id !== "tri-note") load(); }, 120000);
+setInterval(() => { if (!document.hidden && !$("#login").open && !hooksOpen && document.activeElement?.id !== "tri-note") load(); }, 120000);

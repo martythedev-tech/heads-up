@@ -29,7 +29,10 @@ from pathlib import Path
 
 from aiohttp import ClientSession, ClientTimeout, web
 
-VERSION = "0.2.0"
+import vulns as V
+import webhooks as W
+
+VERSION = "0.3.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -42,6 +45,9 @@ TLS_CERT = os.environ.get("HU_TLS_CERT", "/etc/heads-up/tls/server.crt")
 CA_CERT = os.environ.get("HU_CA_CERT", "/etc/heads-up/tls/ca.crt")
 # Ubuntu releases the dashboard reports fix status for (codenames, oldest last).
 UBUNTU_RELEASES = os.environ.get("HU_UBUNTU_RELEASES", "resolute noble jammy").split()
+SERVER_NAME = os.environ.get("SERVER_NAME", "")
+PUBLIC_URL = os.environ.get("HU_PUBLIC_URL") or (
+    f"http://127.0.0.1:{HTTP_PORT}" if DEV else f"https://{SERVER_NAME or 'localhost'}:{HTTPS_PORT}")
 COOKIE = "hu_session"
 SESSION_DAYS = 30
 
@@ -212,6 +218,8 @@ class Fetcher:
         self.nvd_last = 0.0
         self.lock = asyncio.Lock()
         self.last_run = {}
+        self.after_refresh = None
+        self.rounds = 0
 
     async def get(self, url, *, params=None, as_json=False):
         for attempt in (1, 2):
@@ -248,6 +256,14 @@ class Fetcher:
                         await job()
                     except Exception as e:
                         source_err(self.db, name, e)
+                    # Check for alerts after every source, so a slow one
+                    # (enrichment can take minutes) never delays them.
+                    if self.after_refresh:
+                        try:
+                            await self.after_refresh()
+                        except Exception as e:
+                            log(f"after refresh: {e!r}")
+            self.rounds += 1
 
     async def zero_wire(self):
         root = ET.fromstring(await self.get(ZERO_WIRE_RSS))
@@ -412,8 +428,12 @@ class Fetcher:
             f"SELECT id FROM cve WHERE id IN ({','.join('?' * len(detailed)) or "''"})"
             " AND (ubuntu_at IS NULL OR ubuntu_at < ?) LIMIT 60",
             (*sorted(detailed), now() - 6 * 3600))]
+        failures = 0
         for c in todo:
-            await self.ubuntu_one(c)
+            failures = 0 if await self.ubuntu_one(c) else failures + 1
+            if failures >= 3:
+                log("[ubuntu-cve] tracker is failing; trying again next round")
+                break
             await asyncio.sleep(1)
 
     async def nvd_one(self, cve_id):
@@ -456,18 +476,19 @@ class Fetcher:
         self.db.execute("UPDATE cve SET ubuntu_priority=?, ubuntu_at=? WHERE id=?", (prio, now(), cve_id))
 
     async def ubuntu_one(self, cve_id):
+        """True when the tracker answered (found or not), False when it failed."""
         try:
-            async with self.session.get(UBUNTU_CVE.format(cve_id)) as r:
+            async with self.session.get(UBUNTU_CVE.format(cve_id), timeout=ClientTimeout(total=20)) as r:
                 if r.status == 404:
                     self.db.execute("UPDATE cve SET ubuntu_priority='not-in-ubuntu', ubuntu_status='[]',"
                                     " ubuntu_at=? WHERE id=?", (now(), cve_id))
-                    return
+                    return True
                 if r.status != 200:
                     raise RuntimeError(f"HTTP {r.status} for {cve_id}")
                 d = await r.json(content_type=None)
         except Exception as e:
             source_err(self.db, "ubuntu-cve", e)
-            return
+            return False
         status = []
         for p in d.get("packages") or []:
             per = {s["release_codename"]: s["status"] for s in p.get("statuses") or []
@@ -476,6 +497,8 @@ class Fetcher:
                 status.append({"package": p["name"], "releases": per})
         self.db.execute("UPDATE cve SET ubuntu_priority=?, ubuntu_status=?, ubuntu_at=? WHERE id=?",
                         (d.get("priority"), json.dumps(status[:6]), now(), cve_id))
+        source_ok(self.db, "ubuntu-cve", 1)
+        return True
 
 
 # --- auth ---------------------------------------------------------------------
@@ -560,8 +583,7 @@ def item_row(r, cves, triage):
     }
 
 
-async def api_state(request):
-    db = request.app["db"]
+def build_state(db):
     kev = {r["cve"]: dict(r) for r in db.execute("SELECT cve, added, due, ransomware FROM kev")}
     cves = {}
     for r in db.execute("SELECT * FROM cve"):
@@ -577,11 +599,74 @@ async def api_state(request):
     items = [item_row(r, cves, triage) for r in
              db.execute("SELECT * FROM items WHERE active=1 ORDER BY updated DESC, published DESC")]
     sources = {r["name"]: dict(r) for r in db.execute("SELECT * FROM sources")}
+    return {"items": items, "sources": sources, "kevTotal": len(kev),
+            "vulns": V.build(items, UBUNTU_RELEASES)}
+
+
+async def api_state(request):
+    state = build_state(request.app["db"])
+    user = session_name(request)
     return web.json_response({
-        "version": VERSION, "now": now(), "user": session_name(request),
+        "version": VERSION, "now": now(), "user": user,
         "canSignIn": bool(read_login_hash()), "releases": UBUNTU_RELEASES,
-        "items": items, "sources": sources, "kevTotal": len(kev),
+        "webhooksAvailable": request.app["hooks"].box is not None,
+        **state,
     })
+
+
+async def notify_changes(app):
+    hooks = app["hooks"]
+    # On a fresh install, the whole first round only records what exists, so
+    # sources arriving one after another don't look like a flood of news.
+    record_only = app["fresh"] and app["fetcher"].rounds == 0
+    events = hooks.detect(build_state(app["db"])["vulns"], record_only=record_only)
+    if events:
+        log("alerts: " + ", ".join(f"{e}:{v['id']}" for e, v, _ in events))
+    await hooks.send(events)
+
+
+def background(app, coro):
+    task = asyncio.get_running_loop().create_task(coro)
+    app["tasks"].add(task)
+    task.add_done_callback(app["tasks"].discard)
+
+
+def need_user(request):
+    user = session_name(request)
+    if not user:
+        raise web.HTTPUnauthorized(text="Sign in first")
+    return user
+
+
+async def api_webhooks(request):
+    need_user(request)
+    hooks = request.app["hooks"]
+    return web.json_response({"available": hooks.box is not None, "kinds": W.KINDS, "events": W.EVENTS,
+                              "defaultEvents": W.DEFAULT_EVENTS, "webhooks": hooks.list()})
+
+
+async def api_webhook_save(request):
+    user = need_user(request)
+    try:
+        wid = request.app["hooks"].save(await request.json(), user)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response({"id": wid})
+
+
+async def api_webhook_delete(request):
+    user = need_user(request)
+    request.app["hooks"].delete(str((await request.json()).get("id") or ""), user)
+    return web.json_response({})
+
+
+async def api_webhook_test(request):
+    need_user(request)
+    try:
+        ok, detail = await request.app["hooks"].test(str((await request.json()).get("id") or ""))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response({"ok": ok, "detail": detail})
 
 
 async def api_history(request):
@@ -640,6 +725,10 @@ async def api_triage(request):
     db.execute("INSERT OR REPLACE INTO triage VALUES(?,?,?,?,?)", (item_id, state, note, user, t))
     db.execute("INSERT INTO triage_log VALUES(?,?,?,?,?)", (item_id, state, note, user, t))
     log(f"triage {item_id} -> {state} by {user}")
+    v = next((x for x in build_state(db)["vulns"] if x["id"] == item_id), None)
+    if v:
+        background(request.app, request.app["hooks"].send(
+            [("status", v, {"by": user, "state": state, "note": note})]))
     return web.json_response({"state": state, "note": note, "by": user, "at": t})
 
 
@@ -649,9 +738,7 @@ async def api_refresh(request):
     fetcher = request.app["fetcher"]
     if fetcher.lock.locked():
         return web.json_response({"busy": True})
-    task = asyncio.get_running_loop().create_task(fetcher.refresh(force=True))
-    request.app["tasks"].add(task)
-    task.add_done_callback(request.app["tasks"].discard)
+    background(request.app, fetcher.refresh(force=True))
     return web.json_response({"ok": True})
 
 
@@ -665,9 +752,29 @@ async def ca_cert(request):
         "Content-Disposition": 'attachment; filename="heads-up-ca.crt"'})
 
 
+def read_settings_key():
+    if DEV:
+        f = STATE / "dev-settings-key"
+        if not f.exists():
+            f.write_text(secrets.token_hex(32))
+        return f.read_text().strip()
+    try:
+        return (CREDS / "settings-key").read_text().strip()
+    except OSError:
+        log("no settings-key credential: webhooks disabled")
+        return ""
+
+
 def make_app(db, fetcher):
     app = web.Application(middlewares=[guard], client_max_size=64 * 1024)
     app["db"], app["fetcher"], app["attempts"], app["tasks"] = db, fetcher, {}, set()
+    app["hooks"] = W.Webhooks(db, read_settings_key(), PUBLIC_URL)
+    app["fresh"] = app["hooks"].is_empty()
+    fetcher.after_refresh = lambda: notify_changes(app)
+    app.router.add_get("/api/webhooks", api_webhooks)
+    app.router.add_post("/api/webhooks/save", api_webhook_save)
+    app.router.add_post("/api/webhooks/delete", api_webhook_delete)
+    app.router.add_post("/api/webhooks/test", api_webhook_test)
     app.router.add_get("/", index)
     app.router.add_get("/api/state", api_state)
     app.router.add_get("/api/history/{id}", api_history)

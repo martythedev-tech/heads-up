@@ -19,7 +19,7 @@ remote_sudo() {  # remote_sudo SCRIPT — the sudo password is the first stdin l
 }
 
 upload() {
-  tar -cz app.py static deploy | ssh "$SSH_HOST" 'rm -rf ~/heads-up-src && mkdir ~/heads-up-src && tar -xz -C ~/heads-up-src'
+  tar -cz ./*.py static deploy | ssh "$SSH_HOST" 'rm -rf ~/heads-up-src && mkdir ~/heads-up-src && tar -xz -C ~/heads-up-src'
 }
 
 case ${1:-install} in

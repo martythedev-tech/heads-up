@@ -8,11 +8,14 @@ cd "$(dirname "$0")/.."
 ETC=/etc/heads-up
 TLS=$ETC/tls
 
-python3 -c "import aiohttp" 2>/dev/null \
-  || DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3-aiohttp
+for module in aiohttp cryptography; do
+  python3 -c "import $module" 2>/dev/null \
+    || DEBIAN_FRONTEND=noninteractive apt-get install -y -q "python3-$module"
+done
 
 install -d -m 755 /opt/heads-up /opt/heads-up/static
-install -m 644 app.py /opt/heads-up/app.py
+rm -f /opt/heads-up/*.py
+install -m 644 ./*.py /opt/heads-up/
 rm -f /opt/heads-up/static/*
 install -m 644 static/* /opt/heads-up/static/
 
@@ -61,6 +64,14 @@ if [[ ! -f $TLS/server.crt ]] || [[ ! -f $TLS/ca.crt ]] \
   chmod 600 "$TLS/server.key"
   chmod 644 "$TLS/server.crt" "$TLS/ca.crt"
   echo "New certificate issued; browsers need the new ca.crt (http://$SERVER_NAME:${HU_HTTP_PORT:-9080}/ca.crt)." >&2
+fi
+
+# Key that encrypts stored webhook URLs (they carry their own tokens). Made once.
+if [[ ! -f /etc/credstore.encrypted/heads-up.settings-key ]]; then
+  install -d -m 700 /etc/credstore.encrypted
+  openssl rand -hex 32 | tr -d '\n' \
+    | systemd-creds encrypt --name=settings-key - /etc/credstore.encrypted/heads-up.settings-key
+  chmod 600 /etc/credstore.encrypted/heads-up.settings-key
 fi
 
 install -m 644 deploy/heads-up.service /etc/systemd/system/heads-up.service
