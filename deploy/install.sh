@@ -76,8 +76,10 @@ fi
 
 install -m 644 deploy/heads-up.service /etc/systemd/system/heads-up.service
 systemctl daemon-reload
-if [[ ! -f /etc/credstore.encrypted/heads-up.login-hash ]]; then
-  echo "Sign-in password not stored yet (deploy/deploy.sh secrets)" >&2
+# 0.3 and earlier used one shared password; accounts replace it.
+rm -f /etc/credstore.encrypted/heads-up.login-hash
+if [[ ! -f /etc/credstore.encrypted/heads-up.admin-hash ]]; then
+  echo "Set the admin password first:  sudo bash deploy/set-admin-password" >&2
   exit 1
 fi
 systemctl enable heads-up.service >/dev/null 2>&1

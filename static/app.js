@@ -194,12 +194,12 @@ function render() {
   renderSources();
   renderSummary(byGroup);
   renderGroups(byGroup);
-  $("#account").textContent = data.user ? data.user : "Sign in";
-  $("#account").title = data.user ? "Signed in. Click to sign out" : "Sign in to track status";
+  $("#account").textContent = data.user ? data.user.name : "Sign in";
+  $("#account").title = data.user ? "Your account" : "Sign in to track status";
   $("#account").hidden = !data.canSignIn && !data.user;
   $("#refresh").hidden = !data.user;
-  $("#hooks-btn").hidden = !data.user || !data.webhooksAvailable;
-  if (hooksOpen && !data.user) closeDrawer();
+  $("#hooks-btn").hidden = data.user?.role !== "admin" || !data.webhooksAvailable;
+  if ((hooksOpen || accountOpen) && !data.user) closeDrawer();
   $("#version").textContent = `Heads Up ${data.version}`;
   if (openId) renderDrawer(openId, true);
 }
@@ -334,6 +334,7 @@ function openDrawer(id) {
 function closeDrawer() {
   openId = null;
   hooksOpen = false;
+  accountOpen = false;
   $("#drawer").hidden = true;
   $("#scrim").hidden = true;
   history.replaceState(null, "", location.pathname);
@@ -373,6 +374,7 @@ const EVENT_HELP = {
 
 async function openHooks() {
   openId = null;
+  accountOpen = false;
   hooksOpen = true;
   editing = null;
   history.replaceState(null, "", location.pathname);
@@ -494,6 +496,170 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+// --- account & users -------------------------------------------------------------------
+
+let accountOpen = false;
+let usersData = null;
+let userForm = null;          // null, {} (new) or a user being edited
+let revealed = null;          // {username, password} shown once after create/reset
+let confirmUserDel = null;
+const ROLE_LABEL = { admin: "Admin", member: "Member" };
+const ROLE_HELP = { admin: "Can do everything, including managing users and webhooks.", member: "Can set statuses and refresh sources." };
+
+async function openAccount() {
+  openId = null;
+  hooksOpen = false;
+  accountOpen = true;
+  userForm = null;
+  revealed = null;
+  history.replaceState(null, "", location.pathname);
+  await loadUsers();
+}
+
+async function loadUsers() {
+  usersData = null;
+  if (data.user?.role === "admin") {
+    const r = await fetch("/api/users");
+    if (r.ok) usersData = await r.json();
+  }
+  renderAccount();
+}
+
+function revealBox() {
+  if (!revealed) return "";
+  return `<div class="box reveal"><h4>Password for ${esc(revealed.username)}</h4>
+    <p class="small muted">Give this to them. It won't be shown again; they can change it after signing in.</p>
+    <div class="pw-row"><code id="pw-text">${esc(revealed.password)}</code><button class="ghost" id="pw-copy">Copy</button></div>
+    <div class="actions"><button class="ghost" id="pw-done">Done</button></div></div>`;
+}
+
+function userRow(u) {
+  const me = u.username === data.user.username;
+  return `<tr class="${u.disabled ? "off" : ""}">
+    <td><b>${esc(u.name)}</b>${me ? ` <span class="chip">you</span>` : ""}<div class="mono small muted">${esc(u.username)}</div></td>
+    <td>${ROLE_LABEL[u.role]}${u.disabled ? `<div class="small bad-text">Turned off</div>` : ""}</td>
+    <td class="small muted">${u.lastLogin ? ago(u.lastLogin) : "Never"}</td>
+    <td class="u-actions">
+      <button class="ghost" data-u-edit="${esc(u.username)}">Edit</button>
+      <button class="ghost" data-u-reset="${esc(u.username)}">New password</button>
+      ${me ? "" : `<button class="ghost danger" data-u-del="${esc(u.username)}">${confirmUserDel === u.username ? "Click again" : "Delete"}</button>`}
+    </td></tr>`;
+}
+
+function userFormBox(u) {
+  const isNew = !u.username;
+  const role = u.role || "member";
+  const me = u.username === data.user.username;
+  return `<form class="box hook-form" id="user-form">
+    <h4>${isNew ? "Add a user" : `Edit ${esc(u.name)}`}</h4>
+    ${isNew ? `<label>Username<input name="username" maxlength="32" autocapitalize="none" spellcheck="false" placeholder="e.g. jsmith" required></label>` : ""}
+    <label>Name<input name="name" maxlength="40" value="${esc(u.name || "")}" placeholder="Shown next to statuses they set"></label>
+    <fieldset><legend>Role</legend>${Object.entries(ROLE_LABEL).map(([k, l]) =>
+      `<label class="ev"><input type="radio" name="role" value="${k}" ${k === role ? "checked" : ""} ${me ? "disabled" : ""}><span><b>${l}</b><br><span class="muted small">${ROLE_HELP[k]}</span></span></label>`).join("")}</fieldset>
+    ${isNew ? `<label>Password<input name="password" type="text" autocomplete="off" placeholder="Leave empty to create one (recommended)"></label>` : ""}
+    ${!isNew && !me ? `<label class="ev"><input type="checkbox" name="disabled" ${u.disabled ? "checked" : ""}><span>Turn off this account (they can't sign in)</span></label>` : ""}
+    <p class="err" id="user-err"></p>
+    <div class="actions"><button type="button" class="ghost" id="user-cancel">Cancel</button><button class="primary">${isNew ? "Add user" : "Save"}</button></div>
+  </form>`;
+}
+
+function renderAccount() {
+  const drawer = $("#drawer");
+  const u = data.user;
+  const users = usersData ? `
+    <div class="box"><h4>Users <span class="muted small">${usersData.users.length}</span>
+      ${userForm ? "" : `<button class="primary small-btn" id="user-add">Add user</button>`}</h4>
+      <table class="users"><thead><tr><th>Name</th><th>Role</th><th>Last sign-in</th><th></th></tr></thead>
+      <tbody>${usersData.users.map(userRow).join("")}</tbody></table></div>` : "";
+  drawer.innerHTML = `<div class="d-head">
+      <button class="ghost d-close" id="d-close" title="Close (Esc)">✕</button>
+      <div class="d-group">Account</div>
+      <h3>${esc(u.name)}</h3>
+      <p class="d-why">Signed in as <span class="mono">${esc(u.username)}</span> · ${ROLE_LABEL[u.role]}</p>
+    </div>
+    <div class="d-body">
+      ${revealBox()}
+      ${userForm ? userFormBox(userForm) : ""}
+      ${users}
+      <form class="box hook-form" id="pw-form">
+        <h4>Change your password</h4>
+        <label>Current password<input name="current" type="password" autocomplete="current-password" required></label>
+        <label>New password<input name="new" type="password" autocomplete="new-password" minlength="${usersData?.minPassword || 10}" required></label>
+        <label>New password again<input name="again" type="password" autocomplete="new-password" required></label>
+        <p class="err" id="pw-err"></p>
+        <div class="actions"><button class="primary">Change password</button></div>
+      </form>
+      <button class="ghost signout" id="signout">Sign out</button>
+    </div>`;
+  drawer.hidden = false;
+  $("#scrim").hidden = false;
+  $("#d-close").onclick = closeDrawer;
+  $("#signout").onclick = async () => { await post("/api/logout", {}); closeDrawer(); await load(); toast("Signed out"); };
+  const add = $("#user-add");
+  if (add) add.onclick = () => { userForm = {}; revealed = null; renderAccount(); $("#user-form").username.focus(); };
+  const copy = $("#pw-copy");
+  if (copy) copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(revealed.password); toast("Copied"); }
+    catch { getSelection().selectAllChildren($("#pw-text")); toast("Selected. Press Ctrl+C"); }
+  };
+  const done = $("#pw-done");
+  if (done) done.onclick = () => { revealed = null; renderAccount(); };
+  $("#pw-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    if (f.new.value !== f.again.value) { $("#pw-err").textContent = "The new passwords don't match"; return; }
+    const r = await post("/api/me/password", { current: f.current.value, new: f.new.value });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $("#pw-err").textContent = j.error || "Couldn't change it"; return; }
+    f.reset();
+    $("#pw-err").textContent = "";
+    toast("Password changed");
+  };
+  const uf = $("#user-form");
+  if (uf) {
+    $("#user-cancel").onclick = () => { userForm = null; renderAccount(); };
+    uf.onsubmit = async (e) => {
+      e.preventDefault();
+      const isNew = !userForm.username;
+      const body = { name: uf.name.value, role: uf.querySelector("input[name=role]:checked")?.value || userForm.role };
+      let r;
+      if (isNew) r = await post("/api/users/create", { ...body, username: uf.username.value, password: uf.password.value });
+      else r = await post("/api/users/update", { ...body, username: userForm.username, disabled: uf.disabled?.checked ?? false });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { $("#user-err").textContent = j.error || "Couldn't save"; return; }
+      if (isNew) revealed = { username: j.username, password: j.password };
+      userForm = null;
+      toast(isNew ? "User added" : "Saved");
+      if (!isNew && body.name && userForm === null) await load();
+      await loadUsers();
+    };
+  }
+}
+
+document.addEventListener("click", async (e) => {
+  if (!accountOpen) return;
+  const t = e.target.closest("[data-u-edit],[data-u-reset],[data-u-del]");
+  if (!t) return;
+  if (t.dataset.uEdit) { userForm = { ...usersData.users.find((u) => u.username === t.dataset.uEdit) }; revealed = null; return renderAccount(); }
+  if (t.dataset.uReset) {
+    const r = await post("/api/users/reset", { username: t.dataset.uReset });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return toast(j.error || "Couldn't reset it");
+    revealed = { username: t.dataset.uReset, password: j.password };
+    if (t.dataset.uReset === data.user.username) { toast("You'll need to sign in again with the new password"); }
+    return loadUsers();
+  }
+  if (t.dataset.uDel) {
+    if (confirmUserDel !== t.dataset.uDel) { confirmUserDel = t.dataset.uDel; return renderAccount(); }
+    confirmUserDel = null;
+    const r = await post("/api/users/delete", { username: t.dataset.uDel });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return toast(j.error || "Couldn't delete");
+    toast("User deleted");
+    return loadUsers();
+  }
+});
+
 // --- network ------------------------------------------------------------------------
 
 function post(url, body) {
@@ -529,33 +695,30 @@ function toast(msg) {
 
 function openLogin() {
   $("#login-err").textContent = "";
-  try { $("#login-form").name.value = localStorage.getItem("hu.name") || ""; } catch {}
+  try { $("#login-form").username.value = localStorage.getItem("hu.username") || ""; } catch {}
   $("#login").showModal();
+  (($("#login-form").username.value && $("#login-form").password) || $("#login-form").username).focus();
 }
 
+$("#login-cancel").onclick = () => $("#login").close();
 $("#login-form").addEventListener("submit", async (e) => {
-  if (e.submitter?.value !== "ok") return;
+  // Enter in either field and the Sign in button both land here.
   e.preventDefault();
   const f = e.target;
-  const r = await post("/api/login", { name: f.name.value, password: f.password.value });
+  const r = await post("/api/login", { username: f.username.value, password: f.password.value });
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     $("#login-err").textContent = j.error || (r.status === 429 ? "Too many attempts; wait 10 minutes" : "Sign-in failed");
     return;
   }
-  try { localStorage.setItem("hu.name", f.name.value); } catch {}
+  try { localStorage.setItem("hu.username", f.username.value.trim().toLowerCase()); } catch {}
   f.password.value = "";
   $("#login").close();
   await load();
   toast("Signed in");
 });
 
-$("#account").onclick = async () => {
-  if (!data?.user) return openLogin();
-  await post("/api/logout", {});
-  await load();
-  toast("Signed out");
-};
+$("#account").onclick = () => (data?.user ? openAccount() : openLogin());
 
 $("#hooks-btn").onclick = openHooks;
 
@@ -584,9 +747,9 @@ document.addEventListener("click", (e) => {
 $("#scrim").onclick = closeDrawer;
 $("#q").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && (openId || hooksOpen) && !$("#login").open) closeDrawer();
+  if (e.key === "Escape" && (openId || hooksOpen || accountOpen) && !$("#login").open) closeDrawer();
   if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) { e.preventDefault(); $("#q").focus(); }
 });
 
 load();
-setInterval(() => { if (!document.hidden && !$("#login").open && !hooksOpen && document.activeElement?.id !== "tri-note") load(); }, 120000);
+setInterval(() => { if (!document.hidden && !$("#login").open && !hooksOpen && !accountOpen && document.activeElement?.id !== "tri-note") load(); }, 120000);

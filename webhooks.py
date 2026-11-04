@@ -129,10 +129,10 @@ def payload(kind, event, v, extra, link, name="Heads Up"):
     if kind in ("rocketchat", "slack"):
         attachment = {"title": v["title"], "title_link": link, "text": f"{body}\n{desc}".strip(),
                       "color": color, "fields": [{"title": k, "value": val, "short": True} for k, val in fs]}
-        msg = {"text": f"*{head}*", "attachments": [attachment]}
-        if kind == "rocketchat":
-            msg.update(alias=name, emoji=":shield:")
-        return msg
+        # No alias/emoji for Rocket.Chat: setting them needs the
+        # message-impersonate permission (else HTTP 400 error-not-allowed).
+        # The name and avatar come from the integration's own settings.
+        return {"text": f"*{head}*", "attachments": [attachment]}
     if kind == "discord":
         return {"username": name, "content": f"**{head}**", "embeds": [{
             "title": v["title"][:250], "url": link, "description": f"{body}\n\n{desc}"[:3500],
@@ -166,10 +166,7 @@ def summary_payload(kind, events, base_url, name="Heads Up"):
     head = f"🛡️ {len(events)} new alerts"
     if kind in ("rocketchat", "slack"):
         text = "\n".join(f"{ICONS[e]} {EVENTS[e]}: <{l}|{v['title']}>" for e, v, l in lines)
-        msg = {"text": f"*{head}*\n{text}"}
-        if kind == "rocketchat":
-            msg.update(alias=name, emoji=":shield:")
-        return msg
+        return {"text": f"*{head}*\n{text}"}
     if kind == "discord":
         text = "\n".join(f"{ICONS[e]} {EVENTS[e]}: [{v['title']}]({l})" for e, v, l in lines)
         return {"username": name, "content": f"**{head}**\n{text}"[:1900]}
@@ -193,6 +190,21 @@ TEST_VULN = {
     "ubuntuPriority": None, "cveCount": 1, "reportedBy": ["Cloudflare", "CISA", "Ubuntu"],
     "zwHeadline": None,
 }
+
+
+def hint(kind, status, text):
+    """Plain-words explanation for errors chat services commonly return."""
+    if kind == "rocketchat":
+        if "error-not-allowed" in text:
+            return (" (Rocket.Chat: the integration's “Post as” user isn't allowed to post in its channel. "
+                    "For a private channel, add that user to it; also check the channel isn't read-only.)")
+        if "invalid-channel" in text or "error-invalid-room" in text:
+            return " (Rocket.Chat: the integration's channel doesn't exist. Check “Post to Channel”.)"
+        if status == 404:
+            return " (Rocket.Chat: no such integration. Is it enabled, and is the URL complete?)"
+    if status in (401, 403, 404):
+        return " (Check the URL; the webhook may have been deleted or turned off.)"
+    return ""
 
 
 # --- the service ---------------------------------------------------------------------------
@@ -287,7 +299,7 @@ class Webhooks:
                 async with s.post(url, data=data, headers=headers) as r:
                     text = (await r.text())[:200]
                     ok = 200 <= r.status < 300
-                    detail = f"HTTP {r.status}" + ("" if ok else f": {text}")
+                    detail = f"HTTP {r.status}" + ("" if ok else f": {text}") + ("" if ok else hint(row["kind"], r.status, text))
                     if ok or r.status < 500:
                         break
             except Exception as e:

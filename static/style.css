@@ -320,3 +320,17 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
 .hook-form label.ev { display: flex; gap: 10px; align-items: flex-start; color: var(--text); font-size: 13.5px; margin-top: 8px; }
 .hook-form label.ev input { margin-top: 3px; }
 .hook-form .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* account & users */
+table.users { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.users th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.users td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.users tr.off td { opacity: 0.6; }
+.u-actions { text-align: right; white-space: nowrap; }
+.u-actions .ghost { height: 26px; font-size: 12px; padding: 0 8px; }
+.box h4 .small-btn { margin-left: auto; height: 28px; font-size: 12.5px; }
+.reveal { border-color: var(--accent); }
+.pw-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.pw-row code { flex: 1; font: 15px var(--mono); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; user-select: all; }
+.reveal .actions { display: flex; justify-content: flex-end; }
+.signout { align-self: flex-start; }

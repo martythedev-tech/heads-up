@@ -11,7 +11,6 @@ an item Investigating / Not affected / Patched needs the shared password.
 """
 import asyncio
 import hashlib
-import hmac
 import json
 import os
 import re
@@ -29,10 +28,11 @@ from pathlib import Path
 
 from aiohttp import ClientSession, ClientTimeout, web
 
+import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -49,6 +49,8 @@ SERVER_NAME = os.environ.get("SERVER_NAME", "")
 PUBLIC_URL = os.environ.get("HU_PUBLIC_URL") or (
     f"http://127.0.0.1:{HTTP_PORT}" if DEV else f"https://{SERVER_NAME or 'localhost'}:{HTTPS_PORT}")
 COOKIE = "hu_session"
+ASSET_VERSION = hashlib.sha256(b"".join(
+    (HERE / "static" / f).read_bytes() for f in ("app.js", "style.css", "index.html"))).hexdigest()[:10]
 SESSION_DAYS = 30
 
 ZERO_WIRE_RSS = "https://radar.cloudflare.com/security/zero-wire/rss"
@@ -95,7 +97,7 @@ CREATE TABLE IF NOT EXISTS triage (
 CREATE TABLE IF NOT EXISTS triage_log (
   item_id TEXT, state TEXT, note TEXT, by TEXT, at REAL);
 CREATE TABLE IF NOT EXISTS sessions (
-  token_hash TEXT PRIMARY KEY, name TEXT, expires REAL);
+  token_hash TEXT PRIMARY KEY, username TEXT, expires REAL);
 CREATE TABLE IF NOT EXISTS sources (
   name TEXT PRIMARY KEY, ok_at REAL, err_at REAL, error TEXT, count INTEGER);
 """
@@ -106,6 +108,10 @@ def db_open():
     db = sqlite3.connect(STATE / "heads-up.db", isolation_level=None)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
+    # 0.3 sessions belonged to the shared password; accounts replace them.
+    cols = [r[1] for r in db.execute("PRAGMA table_info(sessions)")]
+    if cols and "username" not in cols:
+        db.execute("DROP TABLE sessions")
     db.executescript(SCHEMA)
     return db
 
@@ -387,11 +393,13 @@ class Fetcher:
             if r["source"] in ("zerowire", "kev"):
                 detailed.update(cves)
         everything = sorted(everything)
+        marks_all = ",".join("?" * len(everything)) or "''"
+        marks_detailed = ",".join("?" * len(detailed)) or "''"
         for c in everything:
             self.db.execute("INSERT OR IGNORE INTO cve(id) VALUES(?)", (c,))
         # EPSS: cheap, batched, daily.
         stale = [r["id"] for r in self.db.execute(
-            f"SELECT id FROM cve WHERE id IN ({','.join('?' * len(everything)) or "''"})"
+            f"SELECT id FROM cve WHERE id IN ({marks_all})"
             " AND (epss_at IS NULL OR epss_at < ?)", (*everything, now() - 12 * 3600))]
         for i in range(0, len(stale), 80):
             chunk = stale[i:i + 80]
@@ -419,13 +427,13 @@ class Fetcher:
         # NVD + Ubuntu tracker: per CVE, only for briefings and KEV items. NVD
         # allows 5 requests / 30 s without a key, so space them out.
         todo = [r["id"] for r in self.db.execute(
-            f"SELECT id FROM cve WHERE id IN ({','.join('?' * len(detailed)) or "''"})"
+            f"SELECT id FROM cve WHERE id IN ({marks_detailed})"
             " AND (nvd_at IS NULL OR nvd_at < ?) ORDER BY nvd_at IS NOT NULL, id DESC LIMIT 40",
             (*sorted(detailed), now() - 24 * 3600))]
         for c in todo:
             await self.nvd_one(c)
         todo = [r["id"] for r in self.db.execute(
-            f"SELECT id FROM cve WHERE id IN ({','.join('?' * len(detailed)) or "''"})"
+            f"SELECT id FROM cve WHERE id IN ({marks_detailed})"
             " AND (ubuntu_at IS NULL OR ubuntu_at < ?) LIMIT 60",
             (*sorted(detailed), now() - 6 * 3600))]
         failures = 0
@@ -503,35 +511,39 @@ class Fetcher:
 
 # --- auth ---------------------------------------------------------------------
 
-def read_login_hash():
+def read_admin_hash():
     if DEV:
-        return os.environ.get("HU_DEV_LOGIN_HASH", "")
+        return os.environ.get("HU_DEV_ADMIN_HASH", "")
     try:
-        return (CREDS / "login-hash").read_text().strip()
+        return (CREDS / "admin-hash").read_text().strip()
     except OSError:
         return ""
 
 
-def check_password(password, stored):
-    try:
-        scheme, n, r, p, salt, expected = stored.split(":")
-        if scheme != "scrypt":
-            return False
-        actual = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt),
-                                n=int(n), r=int(r), p=int(p), dklen=len(expected) // 2)
-    except ValueError:
-        return False
-    return hmac.compare_digest(actual.hex(), expected)
-
-
-def session_name(request):
+def session_user(request):
+    """The signed-in user (dict with username, name, role) or None."""
     token = request.cookies.get(COOKIE)
     if not token:
         return None
     row = request.app["db"].execute(
-        "SELECT name FROM sessions WHERE token_hash=? AND expires>?",
+        "SELECT u.username, u.name, u.role FROM sessions s JOIN users u ON u.username = s.username"
+        " WHERE s.token_hash=? AND s.expires>? AND u.disabled=0",
         (hashlib.sha256(token.encode()).hexdigest(), now())).fetchone()
-    return row["name"] if row else None
+    return dict(row) if row else None
+
+
+def need_user(request):
+    user = session_user(request)
+    if not user:
+        raise web.HTTPUnauthorized(text="Sign in first")
+    return user
+
+
+def need_admin(request):
+    user = need_user(request)
+    if user["role"] != "admin":
+        raise web.HTTPForbidden(text="Only admins can do that")
+    return user
 
 
 # --- web ------------------------------------------------------------------------
@@ -560,6 +572,10 @@ async def guard(request, handler):
         resp.headers.setdefault(k, v)
     if request.path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
+    elif request.path == "/" or request.path.startswith("/static/"):
+        # Re-check with the server every time (cheap: ETag), so a deploy never
+        # leaves a browser running an old script against a new page.
+        resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 
@@ -605,10 +621,10 @@ def build_state(db):
 
 async def api_state(request):
     state = build_state(request.app["db"])
-    user = session_name(request)
+    user = session_user(request)
     return web.json_response({
         "version": VERSION, "now": now(), "user": user,
-        "canSignIn": bool(read_login_hash()), "releases": UBUNTU_RELEASES,
+        "canSignIn": request.app["users"].count() > 0, "releases": UBUNTU_RELEASES,
         "webhooksAvailable": request.app["hooks"].box is not None,
         **state,
     })
@@ -631,37 +647,30 @@ def background(app, coro):
     task.add_done_callback(app["tasks"].discard)
 
 
-def need_user(request):
-    user = session_name(request)
-    if not user:
-        raise web.HTTPUnauthorized(text="Sign in first")
-    return user
-
-
 async def api_webhooks(request):
-    need_user(request)
+    need_admin(request)
     hooks = request.app["hooks"]
     return web.json_response({"available": hooks.box is not None, "kinds": W.KINDS, "events": W.EVENTS,
                               "defaultEvents": W.DEFAULT_EVENTS, "webhooks": hooks.list()})
 
 
 async def api_webhook_save(request):
-    user = need_user(request)
+    user = need_admin(request)
     try:
-        wid = request.app["hooks"].save(await request.json(), user)
+        wid = request.app["hooks"].save(await request.json(), user["name"])
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"id": wid})
 
 
 async def api_webhook_delete(request):
-    user = need_user(request)
-    request.app["hooks"].delete(str((await request.json()).get("id") or ""), user)
+    user = need_admin(request)
+    request.app["hooks"].delete(str((await request.json()).get("id") or ""), user["name"])
     return web.json_response({})
 
 
 async def api_webhook_test(request):
-    need_user(request)
+    need_admin(request)
     try:
         ok, detail = await request.app["hooks"].test(str((await request.json()).get("id") or ""))
     except ValueError as e:
@@ -678,26 +687,91 @@ async def api_history(request):
 
 async def api_login(request):
     body = await request.json()
-    stored = read_login_hash()
-    name = str(body.get("name") or "").strip()[:40]
     attempts = request.app["attempts"]
     ip = request.remote or "?"
     recent = [t for t in attempts.get(ip, []) if t > now() - 600]
     if len(recent) >= 8:
         raise web.HTTPTooManyRequests(text="Too many attempts; try again in 10 minutes")
     await asyncio.sleep(0.4)
-    if not name or not stored or not check_password(str(body.get("password") or ""), stored):
+    user = request.app["users"].authenticate(str(body.get("username") or ""), str(body.get("password") or ""))
+    if not user:
         attempts[ip] = recent + [now()]
-        return web.json_response({"error": "Wrong password" if name else "Enter your name"}, status=401)
+        log(f"failed sign-in for {str(body.get('username') or '')[:32]!r} from {ip}")
+        return web.json_response({"error": "Wrong username or password"}, status=401)
     attempts.pop(ip, None)
     token = secrets.token_urlsafe(32)
     request.app["db"].execute("INSERT INTO sessions VALUES(?,?,?)",
-                              (hashlib.sha256(token.encode()).hexdigest(), name,
+                              (hashlib.sha256(token.encode()).hexdigest(), user["username"],
                                now() + SESSION_DAYS * 86400))
-    resp = web.json_response({"user": name})
+    log(f"sign-in: {user['username']}")
+    resp = web.json_response({"user": {k: user[k] for k in ("username", "name", "role")}})
     resp.set_cookie(COOKIE, token, max_age=SESSION_DAYS * 86400, httponly=True,
                     secure=not DEV, samesite="Strict", path="/")
     return resp
+
+
+def user_error(e):
+    return web.json_response({"error": str(e)}, status=400)
+
+
+async def api_me_password(request):
+    user = need_user(request)
+    body = await request.json()
+    try:
+        request.app["users"].change_own_password(user["username"], str(body.get("current") or ""),
+                                                 str(body.get("new") or ""))
+    except U.UserError as e:
+        return user_error(e)
+    log(f"password changed: {user['username']}")
+    return web.json_response({})
+
+
+async def api_users(request):
+    need_admin(request)
+    return web.json_response({"users": request.app["users"].list(), "minPassword": U.MIN_PASSWORD})
+
+
+async def api_user_create(request):
+    admin = need_admin(request)
+    try:
+        username, password = request.app["users"].create(await request.json(), admin["username"])
+    except U.UserError as e:
+        return user_error(e)
+    log(f"user created: {username} by {admin['username']}")
+    return web.json_response({"username": username, "password": password})
+
+
+async def api_user_update(request):
+    admin = need_admin(request)
+    body = await request.json()
+    try:
+        request.app["users"].update(str(body.get("username") or ""), body, admin["username"])
+    except U.UserError as e:
+        return user_error(e)
+    log(f"user updated: {body.get('username')} by {admin['username']}")
+    return web.json_response({})
+
+
+async def api_user_reset(request):
+    admin = need_admin(request)
+    username = str((await request.json()).get("username") or "")
+    try:
+        password = request.app["users"].reset_password(username)
+    except U.UserError as e:
+        return user_error(e)
+    log(f"password reset: {username} by {admin['username']}")
+    return web.json_response({"password": password})
+
+
+async def api_user_delete(request):
+    admin = need_admin(request)
+    username = str((await request.json()).get("username") or "")
+    try:
+        request.app["users"].delete(username, admin["username"])
+    except U.UserError as e:
+        return user_error(e)
+    log(f"user deleted: {username} by {admin['username']}")
+    return web.json_response({})
 
 
 async def api_logout(request):
@@ -711,9 +785,7 @@ async def api_logout(request):
 
 
 async def api_triage(request):
-    user = session_name(request)
-    if not user:
-        raise web.HTTPUnauthorized(text="Sign in to change status")
+    user = need_user(request)["name"]
     body = await request.json()
     item_id = str(body.get("id") or "")
     state = body.get("state")
@@ -733,8 +805,7 @@ async def api_triage(request):
 
 
 async def api_refresh(request):
-    if not session_name(request):
-        raise web.HTTPUnauthorized(text="Sign in to refresh")
+    need_user(request)
     fetcher = request.app["fetcher"]
     if fetcher.lock.locked():
         return web.json_response({"busy": True})
@@ -743,7 +814,11 @@ async def api_refresh(request):
 
 
 async def index(request):
-    return web.FileResponse(HERE / "static" / "index.html")
+    # Versioned asset URLs, so browsers fetch new ones after every deploy.
+    page = (HERE / "static" / "index.html").read_text()
+    for asset in ("app.js", "style.css", "favicon.svg"):
+        page = page.replace(f"/static/{asset}", f"/static/{asset}?v={ASSET_VERSION}")
+    return web.Response(text=page, content_type="text/html")
 
 
 async def ca_cert(request):
@@ -768,9 +843,17 @@ def read_settings_key():
 def make_app(db, fetcher):
     app = web.Application(middlewares=[guard], client_max_size=64 * 1024)
     app["db"], app["fetcher"], app["attempts"], app["tasks"] = db, fetcher, {}, set()
+    app["users"] = U.Users(db)
+    app["users"].sync_bootstrap_admin(read_admin_hash(), log)
     app["hooks"] = W.Webhooks(db, read_settings_key(), PUBLIC_URL)
     app["fresh"] = app["hooks"].is_empty()
     fetcher.after_refresh = lambda: notify_changes(app)
+    app.router.add_post("/api/me/password", api_me_password)
+    app.router.add_get("/api/users", api_users)
+    app.router.add_post("/api/users/create", api_user_create)
+    app.router.add_post("/api/users/update", api_user_update)
+    app.router.add_post("/api/users/reset", api_user_reset)
+    app.router.add_post("/api/users/delete", api_user_delete)
     app.router.add_get("/api/webhooks", api_webhooks)
     app.router.add_post("/api/webhooks/save", api_webhook_save)
     app.router.add_post("/api/webhooks/delete", api_webhook_delete)

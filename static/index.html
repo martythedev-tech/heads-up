@@ -52,15 +52,15 @@
 <aside id="drawer" class="drawer" hidden aria-modal="true" role="dialog"></aside>
 
 <dialog id="login">
-  <form method="dialog" id="login-form">
-    <h3>Sign in to track status</h3>
-    <p class="muted small">Anyone can read this page. Signing in lets you mark items as Investigating, Not affected or Patched.</p>
-    <label>Your name<input name="name" autocomplete="name" required maxlength="40"></label>
+  <form id="login-form">
+    <h3>Sign in</h3>
+    <p class="muted small">Anyone can read this page. Signing in lets you mark items as Investigating, Not affected or Patched. Ask an admin for an account.</p>
+    <label>Username<input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="32"></label>
     <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
     <p class="err" id="login-err"></p>
     <div class="actions">
-      <button value="cancel" formnovalidate class="ghost">Cancel</button>
-      <button value="ok" class="primary">Sign in</button>
+      <button type="button" class="ghost" id="login-cancel">Cancel</button>
+      <button type="submit" value="ok" class="primary">Sign in</button>
     </div>
   </form>
 </dialog>

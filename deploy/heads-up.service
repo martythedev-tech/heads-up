@@ -9,9 +9,10 @@ ExecStart=/usr/bin/python3 /opt/heads-up/app.py
 EnvironmentFile=/etc/heads-up/config.env
 Environment=PYTHONUNBUFFERED=1
 
-# The sign-in hash is encrypted at rest with the host key (systemd-creds) and
+# Secrets are encrypted at rest with the host key (systemd-creds) and
 # decrypted into a private tmpfs only this service can read.
-LoadCredentialEncrypted=login-hash:/etc/credstore.encrypted/heads-up.login-hash
+# admin-hash: password hash for the built-in "admin" account (deploy.sh admin).
+LoadCredentialEncrypted=admin-hash:/etc/credstore.encrypted/heads-up.admin-hash
 LoadCredentialEncrypted=settings-key:/etc/credstore.encrypted/heads-up.settings-key
 LoadCredential=tls-key:/etc/heads-up/tls/server.key
 
