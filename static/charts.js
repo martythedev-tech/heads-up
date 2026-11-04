@@ -233,6 +233,7 @@ function radarSection(radar) {
       ${card("c-industry", "Industries targeted", "Share of web attacks by the target's industry",
         hbars((d.l7Industry || []).slice(0, 10), { label: (r) => nice(r.name), value: (r) => r.value, tip: (r) => `${nice(r.name)}: ${pct(r.value)}`, fmtValue: (v) => pct(v) }), null)}
       ${outageCards(d)}
+      ${routingCards(radar)}
       ${card("c-rules", "Types of web attacks", "What the blocked web attacks were trying to do (Cloudflare managed rules)",
         hbars((d.l7Rules || []).slice(0, 10), { label: (r) => r.name[0].toUpperCase() + r.name.slice(1), value: (r) => r.value, tip: (r) => `${r.name}: ${pct(r.value)} of web attacks caught by managed rules`, fmtValue: (v) => pct(v) }),
         table(["Attack type", "Share"], (d.l7Rules || []).map((r) => [esc(r.name), pct(r.value)])))}
@@ -308,6 +309,52 @@ function outageCards(d) {
       table.replace('<table class="data">', '<table class="data">'), "")}
     ${card("c-outlist", "Outage details", "Newest first; “Details” links to Cloudflare's write-up", `<div class="tbl-scroll">${table}</div>`, null)}
     ${card("c-anom", "Sudden traffic drops, last 7 days", "Networks or places whose traffic suddenly fell; often an outage before it's confirmed", `<div class="tbl-scroll">${anomTable}</div>`, null)}`;
+}
+
+// --- routing (BGP) -----------------------------------------------------------------
+
+const netName = (n) => (n ? `${esc(n.name || "Unknown network")} <span class="muted">AS${esc(n.asn)}${n.cc ? ` · ${esc(n.cc)}` : ""}</span>` : "–");
+const confText = (c) => (c >= 12 ? "Very high" : c >= 10 ? "High" : c >= 8 ? "Medium" : "Low");
+function stateCell(e) {
+  if (e.kind === "leak") {  // Cloudflare rarely marks leaks finished: judge by when it was last seen
+    const recent = e.end && Date.now() - new Date(e.end + (e.end.endsWith("Z") ? "" : "Z")) < 3 * 3600000;
+    return recent ? `<b class="v crit">Ongoing</b>` : `last seen ${esc(when(e.end))}`;
+  }
+  return e.ongoing ? `<b class="v crit">Ongoing</b>` : `ended ${esc(when(e.end))}`;
+}
+
+function hijackTable(rows, limit = 25) {
+  if (!rows.length) return `<p class="muted">None in the last 7 days.</p>`;
+  return `<div class="tbl-scroll"><table class="data"><thead><tr><th>Started</th><th>Network that took the addresses</th><th>Owner of the addresses</th><th>Confidence</th><th>Status</th></tr></thead><tbody>${rows.slice(0, limit).map((e) => `<tr>
+    <td>${esc(when(e.start))}</td><td>${netName(e.hijacker)}</td>
+    <td>${e.victims.map(netName).join("<br>") || "–"}<div class="small muted mono">${esc(e.prefixes.slice(0, 2).join(", "))}${e.prefixCount > 2 ? ` +${e.prefixCount - 2}` : ""}</div></td>
+    <td>${confText(e.confidence)}</td><td>${stateCell(e)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function leakTable(rows, limit = 25) {
+  if (!rows.length) return `<p class="muted">None in the last 7 days.</p>`;
+  return `<div class="tbl-scroll"><table class="data"><thead><tr><th>Started</th><th>Network that leaked</th><th>Path</th><th>Routes</th><th>Status</th></tr></thead><tbody>${rows.slice(0, limit).map((e) => `<tr>
+    <td>${esc(when(e.start))}</td><td>${netName(e.leaker)}</td>
+    <td class="small">${e.path.map((n) => `<span title="${esc(n.name || "")}">AS${esc(n.asn)}</span>`).join(" → ")}<div class="muted">${esc(e.countries.join(", "))}</div></td>
+    <td>${fmt(e.routes)}</td><td>${stateCell(e)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function routingCards(radar) {
+  const d = radar.data || {};
+  const watch = radar.watch || [];
+  const mine = radar.watched || [];
+  const isAdmin = data?.user?.role === "admin";
+  const watchCard = watch.length
+    ? card("c-mynets", `Your networks: ${watch.map((a) => `AS${a}`).join(", ")}`,
+        mine.length ? "Hijacks and leaks involving the networks you watch, last 7 days" : "Nothing involving the networks you watch in the last 7 days",
+        mine.length ? `${hijackTable(mine.filter((e) => e.kind === "hijack"))}${leakTable(mine.filter((e) => e.kind === "leak"))}` : `<p class="ok-text">✓ No routing incidents.</p>`, null)
+    : card("c-mynets", "Watch your own networks", "Get told when your company's or ISP's network is involved in a hijack or leak",
+        `<p class="muted">${isAdmin ? "Add your AS numbers under your name → Cloudflare Radar → Networks to watch. Not sure of yours? Search your public IP at bgp.he.net." : "Ask an admin to add the networks (AS numbers) to watch."}</p>`, null);
+  return `${watchCard}
+    ${card("c-hijacks", "Route hijacks, last 7 days", "A network announced internet addresses that belong to someone else, so traffic for them can go the wrong way. High-confidence only.",
+      hijackTable(d.hijacks || []), null)}
+    ${card("c-leaks", "Route leaks, last 7 days", "A network passed on routes it shouldn't have, sending traffic on a detour. Largest first.",
+      leakTable(d.leaks || []), null)}`;
 }
 
 // --- Patch Tuesday -----------------------------------------------------------------

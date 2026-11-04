@@ -37,7 +37,7 @@ import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -242,6 +242,8 @@ class Fetcher:
         self.after_refresh = None
         self.radar_token = lambda: None
         self.vulncheck_token = lambda: None
+        self.watch_asns = lambda: []
+        self.on_routing = None
         self.on_patch_tuesday = None
         self.rounds = 0
 
@@ -443,12 +445,14 @@ class Fetcher:
         token = self.radar_token()
         if not token:
             return
-        errors = await C.radar_refresh(self.db, self.session, token)
-        if len(errors) == len(C.RADAR_QUERIES):
+        errors = await C.radar_refresh(self.db, self.session, token, self.watch_asns())
+        if len(errors) >= len(C.RADAR_QUERIES):
             raise RuntimeError(errors[0])
         for e in errors:
             log(f"[radar] {e}")
         source_ok(self.db, "radar", len(C.RADAR_QUERIES) - len(errors))
+        if self.on_routing:
+            await self.on_routing()
 
     async def enrich(self):
         rows = self.db.execute("SELECT source, cves FROM items WHERE active=1").fetchall()
@@ -801,8 +805,70 @@ async def api_charts(request):
     out["patchTuesday"] = MS.summary(db)
     out["vulncheck"] = VC.stats(db, datetime.now(timezone.utc).date().isoformat()) if secret_setting(request.app, "vulncheck_token") else None
     out["radar"] = {"configured": bool(radar_token(request.app)), "data": radar, "at": at,
+                    "watch": watch_asns(request.app), "watched": C.watched_events(radar),
                     "error": src["error"] if src and src["error"] and (not src["ok_at"] or src["err_at"] > src["ok_at"]) else None}
     return compressed(request, out)
+
+
+def watch_asns(app):
+    row = app["db"].execute("SELECT value FROM meta WHERE key='watch_asns'").fetchone()
+    return json.loads(row[0]) if row else []
+
+
+async def api_settings_watch(request):
+    admin = need_admin(request)
+    raw = str((await request.json()).get("asns") or "")
+    asns = []
+    for part in raw.replace(",", " ").split():
+        part = part.upper().removeprefix("AS")
+        if not part.isdigit() or not 0 < int(part) < 4294967296:
+            return web.json_response({"error": f"“{part}” isn't an AS number (e.g. 13335 or AS13335)"}, status=400)
+        asns.append(int(part))
+    asns = sorted(set(asns))[:5]
+    db = request.app["db"]
+    db.execute("INSERT OR REPLACE INTO meta VALUES('watch_asns', ?)", (json.dumps(asns),))
+    db.execute("DELETE FROM meta WHERE key='routing_seen'")  # next check records history instead of alerting on it
+    db.execute("DELETE FROM radar WHERE key LIKE 'watch%'")
+    log(f"watched networks set to {asns} by {admin['username']}")
+    fetcher = request.app["fetcher"]
+
+    async def refetch():
+        async with fetcher.lock:
+            try:
+                await fetcher.radar()
+            except Exception as e:
+                source_err(db, "radar", e)
+    if radar_token(request.app):
+        background(request.app, refetch())
+    return web.json_response({"asns": asns})
+
+
+async def announce_routing(app):
+    """Alert webhooks about new hijacks/leaks involving watched networks."""
+    db = app["db"]
+    radar, _ = C.radar_data(db)
+    events = C.watched_events(radar)
+    row = db.execute("SELECT value FROM meta WHERE key='routing_seen'").fetchone()
+    seen = set(json.loads(row[0])) if row else None
+    db.execute("INSERT OR REPLACE INTO meta VALUES('routing_seen', ?)",
+               (json.dumps(sorted({e["id"] for e in events} | (seen or set()))[-1000:]),))
+    if seen is None:
+        return  # first look after (re)setting the list: record, don't alert on history
+    for e in [e for e in events if e["id"] not in seen][:5]:
+        if e["kind"] == "hijack":
+            title = f"Possible route hijack involving AS{e['watchedAsn']}"
+            body = (f"{(e['hijacker'] or {}).get('name') or 'AS' + str(e['hijacker']['asn'])} (AS{e['hijacker']['asn']}) announced "
+                    f"{e['prefixCount']} prefix(es) belonging to " + ", ".join(f"{v.get('name') or ''} (AS{v['asn']})" for v in e["victims"]) +
+                    f". Cloudflare confidence {e['confidence']}." + (" Still ongoing." if e["ongoing"] else ""))
+        else:
+            title = f"Route leak involving AS{e['watchedAsn']}"
+            body = (f"{(e['leaker'] or {}).get('name') or ''} (AS{e['leaker']['asn']}) leaked {e['routes']} routes "
+                    f"along " + " → ".join(f"AS{n['asn']}" for n in e["path"]) + "." + (" Still ongoing." if e["ongoing"] else ""))
+        log(f"alerts: routing {e['id']}")
+        await app["hooks"].send_note("routing", title, body,
+                                     [("Started", (e.get("start") or "")[:16].replace("T", " ") + " UTC"),
+                                      ("Watched network", f"AS{e['watchedAsn']}")],
+                                     f"{app['hooks'].base_url}/")
 
 
 def radar_token(app):
@@ -825,7 +891,8 @@ async def api_settings(request):
     db = request.app["db"]
     src = db.execute("SELECT * FROM sources WHERE name='radar'").fetchone()
     vsrc = db.execute("SELECT * FROM sources WHERE name='vulncheck'").fetchone()
-    return web.json_response({"radar": {"configured": bool(radar_token(request.app)),
+    return web.json_response({"watchAsns": watch_asns(request.app),
+                              "radar": {"configured": bool(radar_token(request.app)),
                                         "okAt": src["ok_at"] if src else None,
                                         "error": src["error"] if src else None},
                               "vulncheck": {"configured": bool(secret_setting(request.app, "vulncheck_token")),
@@ -861,10 +928,7 @@ async def api_settings_radar(request):
     async def first_fetch():
         async with fetcher.lock:
             try:
-                errors = await C.radar_refresh(app["db"], fetcher.session, token)
-                for e in errors:
-                    log(f"[radar] {e}")
-                source_ok(app["db"], "radar", len(C.RADAR_QUERIES) - len(errors))
+                await fetcher.radar()
             except Exception as e:
                 source_err(app["db"], "radar", e)
     background(app, first_fetch())
@@ -1081,11 +1145,14 @@ def make_app(db, fetcher):
     fetcher.after_refresh = lambda: notify_changes(app)
     fetcher.radar_token = lambda: radar_token(app)
     fetcher.vulncheck_token = lambda: secret_setting(app, "vulncheck_token")
+    fetcher.watch_asns = lambda: watch_asns(app)
+    fetcher.on_routing = lambda: announce_routing(app)
     fetcher.on_patch_tuesday = lambda: announce_patch_tuesday(app)
     app.router.add_get("/api/charts", api_charts)
     app.router.add_get("/api/settings", api_settings)
     app.router.add_post("/api/settings/radar", api_settings_radar)
     app.router.add_post("/api/settings/vulncheck", api_settings_vulncheck)
+    app.router.add_post("/api/settings/watch", api_settings_watch)
     app.router.add_post("/api/me/password", api_me_password)
     app.router.add_get("/api/users", api_users)
     app.router.add_post("/api/users/create", api_user_create)

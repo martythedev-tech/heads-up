@@ -448,6 +448,7 @@ const EVENT_HELP = {
   updated: "Cloudflare changes its advice on something in Act now or Patch soon.",
   status: "Someone marks an item Investigating, Not affected or Patched.",
   patch: "Microsoft publishes a month's security updates: one summary with zero-days, criticals and what to patch first.",
+  routing: "A route hijack or leak involves one of the networks you watch (set under Cloudflare Radar).",
 };
 
 async function openHooks() {
@@ -625,7 +626,13 @@ function radarBox() {
     <label>API token<input name="token" autocomplete="off" spellcheck="false" placeholder="${r.configured ? "Leave empty to keep the current token" : "Paste the token"}"></label>
     <p class="err" id="radar-err"></p>
     <div class="actions">${r.configured ? `<button type="button" class="ghost danger" id="radar-remove">Turn off</button>` : ""}<button class="primary">${r.configured ? "Replace token" : "Turn on"}</button></div>
-  </form>`;
+  </form>
+  ${r.configured ? `<form class="box hook-form" id="watch-form">
+    <h4>Networks to watch</h4>
+    <p class="small muted">AS numbers of your company's or ISP's networks (up to 5). The Charts tab then shows any route hijack or leak involving them, and webhooks can alert you. Find yours by searching your public IP at bgp.he.net.</p>
+    <label>AS numbers<input name="asns" value="${esc((settingsData.watchAsns || []).map((a) => `AS${a}`).join(", "))}" placeholder="e.g. AS13335, AS7018"></label>
+    <p class="err" id="watch-err"></p>
+    <div class="actions"><button class="primary">Save</button></div></form>` : ""}`;
 }
 
 function vulncheckBox() {
@@ -677,6 +684,15 @@ function wireRadarBox() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { $("#radar-err").textContent = j.error || "Couldn't save it"; return; }
     toast("Cloudflare Radar is on. The maps fill in within a minute");
+    await loadUsers();
+  };
+  const wf = $("#watch-form");
+  if (wf) wf.onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await post("/api/settings/watch", { asns: wf.asns.value });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $("#watch-err").textContent = j.error || "Couldn't save"; return; }
+    toast(j.asns.length ? `Watching ${j.asns.map((a) => `AS${a}`).join(", ")}. Checking now` : "Not watching any networks");
     await loadUsers();
   };
   const rm = $("#radar-remove");

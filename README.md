@@ -49,8 +49,10 @@ or have a Metasploit module / Exploit-DB entry and High severity or more.
 - **Internet attacks** ([Cloudflare Radar](https://radar.cloudflare.com),
   optional, needs a free read-only token): world map of where web and DDoS
   attacks come from and who they target, attack volume, attack routes,
-  industries, attack types, internet outages (30 days) and sudden traffic
-  drops (7 days)
+  industries, attack types, internet outages (30 days), sudden traffic
+  drops (7 days), and route hijacks and leaks (7 days). Admins can name up to
+  five networks (AS numbers) to watch; hijacks or leaks involving them are
+  listed separately and can trigger a webhook
 
 Anyone who can reach the page can read it. Signed-in users mark items
 **Investigating**, **Not affected** or **Patched** with a note; every change is
@@ -184,6 +186,7 @@ choice of what to be told about:
   (the message says what changed)
 - **Status changed**: someone marked an item Investigating, Not affected or Patched
 - **Patch Tuesday is out**: one summary when Microsoft publishes a month's updates
+- **Routing incident on a watched network**: a route hijack or leak involves a network you watch
 
 Nothing is sent for what already exists when Heads Up first starts. More than
 four alerts at once arrive as one summary. Webhook URLs are stored encrypted.

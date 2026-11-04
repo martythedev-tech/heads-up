@@ -29,10 +29,10 @@ KINDS = {"rocketchat": "Rocket.Chat", "slack": "Slack", "teams": "Microsoft Team
          "discord": "Discord", "json": "Plain JSON"}
 EVENTS = {"act": "New in Act now", "soon": "New in Patch soon",
           "updated": "Cloudflare updated its guidance", "status": "Status changed",
-          "patch": "Patch Tuesday is out"}
+          "patch": "Patch Tuesday is out", "routing": "Routing incident on a watched network"}
 DEFAULT_EVENTS = ["act", "updated"]
-COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55"}
-ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹"}
+COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55", "routing": "#6250d6"}
+ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹", "routing": "🛰️"}
 BATCH_LIMIT = 4   # more events than this for one webhook in one go -> one summary message
 
 SCHEMA = """

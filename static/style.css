@@ -466,3 +466,6 @@ table.data tr.click:hover td { background: var(--panel-2); }
 .box.src-vc { border-top: 3px solid var(--src-vc); }
 .sources-strip { grid-template-columns: repeat(3, 1fr); }
 ul.plain { list-style: none; padding: 0; margin: 0; }
+
+/* routing */
+#c-mynets, #c-hijacks, #c-leaks { grid-column: 1 / -1; }

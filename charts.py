@@ -125,6 +125,10 @@ RADAR_QUERIES = {
     "l7Series": ("/attacks/layer7/timeseries", {"dateRange": "28d", "aggInterval": "1d"}),
     "outages": ("/annotations/outages", {"dateRange": "30d", "limit": "100"}),
     "anomalies": ("/traffic_anomalies", {"dateRange": "7d", "limit": "60"}),
+    # BGP: high-confidence hijacks, and route leaks (sorted by size on our side)
+    "hijacks": ("/bgp/hijacks/events", {"dateRange": "7d", "per_page": "100", "minConfidence": "10",
+                                         "sortBy": "TIME", "sortOrder": "DESC"}),
+    "leaks": ("/bgp/leaks/events", {"dateRange": "7d", "per_page": "100"}),
 }
 RADAR_TEST = ("/attacks/layer7/summary/MITIGATION_PRODUCT", {"dateRange": "1d"})
 RADAR_SCHEMA = """
@@ -205,15 +209,54 @@ def _simplify(key, result):
                          "type": a.get("type"), "iso": loc.get("code"), "place": loc.get("name"),
                          "asn": asn.get("asn"), "asnName": asn.get("name")})
         return rows
+    if key in ("hijacks", "leaks") or key.startswith("watch"):
+        return simplify_bgp(key, result)
     if key == "l7Series":
         s = result.get("serie_0") or {}
         return [{"t": t, "value": float(v)} for t, v in zip(s.get("timestamps") or [], s.get("values") or [])]
     return result
 
 
-async def radar_refresh(db, session, token):
+def _asn_names(result):
+    return {a.get("asn"): {"name": a.get("org_name"), "cc": a.get("country_code")} for a in result.get("asn_info") or []}
+
+
+def simplify_bgp(key, result):
+    names = _asn_names(result)
+    net = lambda asn: {"asn": asn, "name": (names.get(asn) or {}).get("name"), "cc": (names.get(asn) or {}).get("cc")}
+    out = []
+    if "hijack" in key or key.startswith("watch"):
+        for e in result.get("events") or []:
+            if "hijacker_asn" not in e:
+                continue
+            out.append({"kind": "hijack", "id": f"h{e.get('id')}", "start": e.get("min_hijack_ts"), "end": e.get("max_hijack_ts"),
+                        "ongoing": bool(e.get("on_going_count")), "confidence": e.get("confidence_score"),
+                        "hijacker": net(e.get("hijacker_asn")), "victims": [net(a) for a in e.get("victim_asns") or []][:4],
+                        "victimCountries": e.get("victim_countries") or [], "prefixes": (e.get("prefixes") or [])[:5],
+                        "prefixCount": len(e.get("prefixes") or []), "peers": e.get("peer_ip_count")})
+    if "leak" in key or key.startswith("watch"):
+        for e in result.get("events") or []:
+            if "leak_asn" not in e:
+                continue
+            out.append({"kind": "leak", "id": f"l{e.get('id')}", "start": e.get("min_ts"), "end": e.get("max_ts"),
+                        "ongoing": not e.get("finished"), "leaker": net(e.get("leak_asn")),
+                        "path": [net(a) for a in e.get("leak_seg") or []], "countries": sorted(set(e.get("countries") or [])),
+                        "routes": e.get("leak_count"), "prefixCount": e.get("prefix_count"), "peers": e.get("peer_count")})
+    if key == "leaks":
+        out.sort(key=lambda x: -(x.get("routes") or 0))
+        out = out[:40]
+    return out
+
+
+async def radar_refresh(db, session, token, watch=()):
     errors = []
-    for key, (path, params) in RADAR_QUERIES.items():
+    queries = dict(RADAR_QUERIES)
+    # networks the admin asked to watch: any hijack (confidence 6+) or leak involving them
+    for asn in watch:
+        queries[f"watchH{asn}"] = ("/bgp/hijacks/events", {"dateRange": "7d", "per_page": "50", "involvedAsn": str(asn), "minConfidence": "6"})
+        queries[f"watchL{asn}"] = ("/bgp/leaks/events", {"dateRange": "7d", "per_page": "50", "involvedAsn": str(asn)})
+    db.execute("DELETE FROM radar WHERE key LIKE 'watch%'")
+    for key, (path, params) in queries.items():
         try:
             result = await radar_get(session, token, path, params)
             db.execute("INSERT OR REPLACE INTO radar VALUES(?,?,?)",
@@ -221,6 +264,18 @@ async def radar_refresh(db, session, token):
         except Exception as e:
             errors.append(f"{key}: {e}")
     return errors
+
+
+def watched_events(radar):
+    """All events involving watched networks, newest first, de-duplicated."""
+    seen, out = set(), []
+    for key, rows in radar.items():
+        if key.startswith("watch"):
+            for e in rows:
+                if e["id"] not in seen:
+                    seen.add(e["id"])
+                    out.append({**e, "watchedAsn": int(key[6:])})
+    return sorted(out, key=lambda e: e.get("start") or "", reverse=True)
 
 
 def radar_data(db):
