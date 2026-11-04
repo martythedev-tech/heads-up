@@ -11,6 +11,7 @@ const SOURCES = {
   cf: { name: "Cloudflare", what: "Expert write-ups of the most important internet-facing vulnerabilities, with what to do.", feeds: ["zerowire"], url: "https://radar.cloudflare.com/security/zero-wire", stale: 2 * 3600 },
   cisa: { name: "CISA", what: "US government list of vulnerabilities attackers are confirmed to be using.", feeds: ["kev"], url: "https://www.cisa.gov/known-exploited-vulnerabilities-catalog", stale: 8 * 3600 },
   ubu: { name: "Ubuntu", what: "Security updates for Ubuntu and whether each release has a fix yet.", feeds: ["ubuntu", "osv"], url: "https://ubuntu.com/security/notices", stale: 3 * 3600 },
+  ex: { name: "Exploit code", what: "Public attack code: Metasploit modules, Exploit-DB and proof-of-concepts on GitHub.", feeds: ["exploits", "poc"], url: "https://www.exploit-db.com", stale: 26 * 3600 },
 };
 const GROUPS = {
   act: { title: "Act now", explain: "Attackers are using these. Check whether you run them, then patch.", cls: "g-act" },
@@ -106,6 +107,7 @@ function badges(v) {
   const b = [];
   if (v.zw) b.push(`<span class="badge cf">Cloudflare <span class="detail">briefing</span></span>`);
   if (v.exploited) b.push(`<span class="badge cisa">CISA <span class="detail">exploited</span></span>`);
+  if (v.exploit) b.push(`<span class="badge ex">${{ metasploit: "Metasploit", exploitdb: "Exploit-DB", poc: "GitHub" }[v.exploit]} <span class="detail">${v.exploit === "poc" ? "proof of concept" : "exploit"}</span></span>`);
   if (v.ubuntu.fixed.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix out</span></span>`);
   else if (v.ubuntu.pending.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix pending</span></span>`);
   return b.join("");
@@ -123,8 +125,14 @@ function facts(v) {
     rows.push(["Severity", sev ? `<span class="v ${sev.cls}">${sev.label} · ${v.cvss.toFixed(1)}</span>` : `<span class="v none">Not scored yet</span>`]);
     rows.push(["Exploited", v.exploited ? `<span class="v crit">Yes</span>` : `<span class="v none">Not confirmed</span>`]);
   }
+  const arrow = v.epssTrend === "rising" ? " ↑" : v.epssTrend === "falling" ? " ↓" : "";
+  const was = v.epssWas != null ? `, ${(v.epssWas * 100).toFixed(1)}% a month ago` : "";
   if (v.exploited) rows.push(["Exploit chance", `<span class="v crit" title="CISA has confirmed attacks">Already happening</span>`]);
-  else rows.push(["Exploit chance", ex ? `<span class="v ${ex.cls}" title="${ex.pct}% chance of exploitation in the next 30 days (FIRST EPSS)">${ex.label}</span>` : `<span class="v none">Unknown</span>`]);
+  else rows.push(["Exploit chance", ex ? `<span class="v ${ex.cls}" title="${ex.pct}% chance of exploitation in the next 30 days${was} (FIRST EPSS)">${ex.label}${arrow}</span>` : `<span class="v none">Unknown</span>`]);
+  if (!v.usnPrimary) {
+    const pe = { metasploit: ["crit", "Metasploit"], exploitdb: ["high", "Exploit-DB"], poc: ["med", "GitHub PoC"] }[v.exploit];
+    rows.push(["Public exploit", pe ? `<span class="v ${pe[0]}">${pe[1]}</span>` : `<span class="v none">None known</span>`]);
+  }
   return `<div class="facts">${rows.map(([k, val]) => `<div class="fact"><span class="k">${k}</span>${val}</div>`).join("")}</div>`;
 }
 
@@ -261,6 +269,38 @@ function ubuBox(v) {
     ${notices ? `<div class="label">Security notices</div><ul class="small">${notices}</ul>` : ""}</div>`;
 }
 
+function sparkline(series, w = 84, h = 22) {
+  if (!series || series.length < 2) return "";
+  const vals = series.map((p) => p.e);
+  const max = Math.max(...vals, 0.0001), min = Math.min(...vals);
+  const span = max - min || max;
+  const pts = vals.map((e, i) => `${((i / (vals.length - 1)) * (w - 4) + 2).toFixed(1)},${(h - 3 - ((e - min) / span) * (h - 6)).toFixed(1)}`).join(" ");
+  const last = pts.split(" ").pop().split(",");
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="exploit chance over 30 days"><polyline points="${pts}"/><circle cx="${last[0]}" cy="${last[1]}" r="2.5"/></svg>`;
+}
+
+function exploitBox(v) {
+  if (v.usnPrimary) return "";
+  const msf = v.cveList.flatMap((c) => (c.msf || []).map((m) => ({ ...m, cve: c.id })));
+  const edb = v.cveList.flatMap((c) => (c.edb || []).map((m) => ({ ...m, cve: c.id })));
+  const poc = v.cveList.flatMap((c) => (c.poc || []).map((m) => ({ ...m, cve: c.id })));
+  const checked = v.cveList.some((c) => c.poc != null);
+  if (!msf.length && !edb.length && !poc.length) {
+    return `<div class="box src-ex"><h4><span class="badge ex">Exploit code</span> none known</h4>
+      <p class="muted small">${checked ? "No Metasploit module, Exploit-DB entry or GitHub proof-of-concept found." : "No Metasploit module or Exploit-DB entry found. GitHub is checked within the hour."}</p></div>`;
+  }
+  return `<div class="box src-ex"><h4><span class="badge ex">Exploit code</span> is public</h4>
+    ${msf.length ? `<div class="label">Metasploit: ready-made attack module</div><ul class="small">${msf.map((m) =>
+      `<li><a href="https://www.rapid7.com/db/modules/${esc(m.name)}/" target="_blank" rel="noopener"><span class="mono">${esc(m.name)}</span></a> · ${esc(m.title)}${m.rank ? ` · rank ${esc(m.rank)}` : ""} <span class="muted">(${esc(m.cve)})</span></li>`).join("")}</ul>` : ""}
+    ${edb.length ? `<div class="label">Exploit-DB: published exploit code</div><ul class="small">${edb.map((m) =>
+      `<li><a href="https://www.exploit-db.com/exploits/${esc(m.id)}" target="_blank" rel="noopener">EDB-${esc(m.id)}</a> · ${esc(m.title)} · ${esc(m.date)}${m.verified ? " · verified" : ""} <span class="muted">(${esc(m.cve)})</span></li>`).join("")}</ul>` : ""}
+    ${poc.length ? `<div class="label">Proof-of-concept code on GitHub</div>
+      <p class="small warn-text">Unvetted code from strangers: some are only scanners, some are fake or malware. Read it before running anything.</p>
+      <ul class="small">${poc.slice(0, 6).map((m) =>
+      `<li><a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.name)}</a> · ★ ${m.stars} · ${esc(m.created)}${m.description ? ` · <span class="muted">${esc(m.description)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+  </div>`;
+}
+
 function scoresBox(v) {
   let list = v.cveList;
   if (!list.length) return "";
@@ -270,11 +310,11 @@ function scoresBox(v) {
     const ex = exploitChance(c.epss);
     return `<tr><td><a class="mono" href="https://nvd.nist.gov/vuln/detail/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a></td>
       <td>${sev ? `<span class="v ${sev.cls}">${sev.label} · ${c.cvss.toFixed(1)}</span>` : `<span class="muted">not scored yet</span>`}</td>
-      <td>${ex ? `<span class="v ${ex.cls}">${ex.label}</span> <span class="muted">(${ex.pct}%)</span>` : `<span class="muted">unknown</span>`}</td>
+      <td>${ex ? `<span class="v ${ex.cls}">${ex.label}</span> <span class="muted">(${ex.pct}%)</span>${c.epssSeries && c.epssSeries.length > 1 ? `<div class="spark-row">${sparkline(c.epssSeries)}<span class="muted small">${(c.epssSeries[0].e * 100).toFixed(1)}% on ${esc(day(c.epssSeries[0].d))}</span></div>` : ""}` : `<span class="muted">unknown</span>`}</td>
       <td>${c.kev ? `<span class="v crit">Yes</span> <span class="muted">since ${esc(day(c.kev.added))}</span>` : `<span class="muted">not confirmed</span>`}</td></tr>`;
   }).join("");
   return `<div class="box"><h4>Scores per CVE${v.cveList.length > list.length ? ` <span class="muted small">(${list.length} most likely to be exploited, of ${v.cveList.length})</span>` : ""}</h4>
-    <table class="cves"><thead><tr><th>CVE</th><th>Severity<small>0–10, from NVD</small></th><th>Exploit chance<small>next 30 days, from FIRST</small></th><th>Exploited<small>from CISA</small></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    <table class="cves"><thead><tr><th>CVE</th><th>Severity<small>0–10, from NVD</small></th><th>Exploit chance<small>next 30 days, trend over the last month, from FIRST</small></th><th>Exploited<small>from CISA</small></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function triageBox(v) {
@@ -301,7 +341,7 @@ function renderDrawer(id, keepScroll) {
       <h3>${esc(v.title)}</h3>
       <p class="d-why">${v.why}</p>
     </div>
-    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
+    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
   drawer.hidden = false;
   $("#scrim").hidden = false;
   if (keepScroll) drawer.scrollTop = scroll;

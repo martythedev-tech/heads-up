@@ -29,11 +29,12 @@ from pathlib import Path
 from aiohttp import ClientSession, ClientTimeout, web
 
 import charts as C
+import exploits as X
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -117,6 +118,7 @@ def db_open():
     if "cwes" not in [r[1] for r in db.execute("PRAGMA table_info(kev)")]:
         db.execute("ALTER TABLE kev ADD COLUMN cwes TEXT")
     db.executescript(C.RADAR_SCHEMA)
+    X.migrate(db)
     return db
 
 
@@ -259,6 +261,7 @@ class Fetcher:
             jobs = [("zerowire", 30 * 60, self.zero_wire),
                     ("kev", 3 * 3600, self.kev),
                     ("ubuntu", 60 * 60, self.ubuntu),
+                    ("exploits", 24 * 3600, self.exploits),
                     ("enrich", 60 * 60, self.enrich),
                     ("radar", 60 * 60, self.radar)]
             for name, every, job in jobs:
@@ -391,6 +394,10 @@ class Fetcher:
         retire_missing(self.db, "ubuntu", ids)
         source_ok(self.db, "ubuntu", len(ids))
 
+    async def exploits(self):
+        n = await X.refresh_index(self.db, self.session)
+        source_ok(self.db, "exploits", n)
+
     async def radar(self):
         token = self.radar_token()
         if not token:
@@ -428,6 +435,15 @@ class Fetcher:
                 self.db.execute("UPDATE cve SET epss=?, epss_pct=?, epss_at=? WHERE id=?",
                                 (float(d["epss"]) if d else None, float(d["percentile"]) if d else None, now(), c))
         source_ok(self.db, "epss", len(everything))
+        # Exploit-chance history and GitHub proof-of-concept repos, for the
+        # CVEs in briefings and CISA items (not every CVE in an Ubuntu notice).
+        try:
+            await X.refresh_series(self.db, self.session, sorted(detailed))
+            source_ok(self.db, "epss-history", len(detailed))
+        except Exception as e:
+            source_err(self.db, "epss-history", e)
+        n = await X.refresh_poc(self.db, self.session, sorted(detailed), log)
+        source_ok(self.db, "poc", n)
         # Ubuntu's priority for every CVE in a notice, via OSV (reliable, fast).
         marks = ",".join("?" * len(everything)) or "''"
         todo = [r["id"] for r in self.db.execute(
@@ -627,7 +643,12 @@ def build_state(db):
             "ubuntuPriority": r["ubuntu_priority"],
             "ubuntu": json.loads(r["ubuntu_status"]) if r["ubuntu_status"] else None,
             "kev": kev.get(r["id"]),
+            "epssSeries": json.loads(r["epss_series"]) if r["epss_series"] else None,
+            "poc": json.loads(r["poc"]) if r["poc"] is not None else None,
         }
+    for cve_id, ex in X.exploit_rows(db, cves).items():
+        cves[cve_id]["edb"] = ex["edb"][:5]
+        cves[cve_id]["msf"] = ex["msf"][:5]
     triage = {r["item_id"]: {"state": r["state"], "note": r["note"], "by": r["by"], "at": r["at"]}
               for r in db.execute("SELECT * FROM triage")}
     items = [item_row(r, cves, triage) for r in
@@ -640,12 +661,19 @@ def build_state(db):
 async def api_state(request):
     state = build_state(request.app["db"])
     user = session_user(request)
-    return web.json_response({
+    return compressed(request, {
         "version": VERSION, "now": now(), "user": user,
         "canSignIn": request.app["users"].count() > 0, "releases": UBUNTU_RELEASES,
         "webhooksAvailable": request.app["hooks"].box is not None,
         **state,
     })
+
+
+def compressed(request, payload):
+    resp = web.json_response(payload)
+    if "gzip" in request.headers.get("Accept-Encoding", ""):
+        resp.enable_compression()
+    return resp
 
 
 async def notify_changes(app):
@@ -704,7 +732,7 @@ async def api_charts(request):
     src = db.execute("SELECT * FROM sources WHERE name='radar'").fetchone()
     out["radar"] = {"configured": bool(radar_token(request.app)), "data": radar, "at": at,
                     "error": src["error"] if src and src["error"] and (not src["ok_at"] or src["err_at"] > src["ok_at"]) else None}
-    return web.json_response(out)
+    return compressed(request, out)
 
 
 def radar_token(app):

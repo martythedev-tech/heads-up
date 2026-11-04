@@ -238,6 +238,32 @@ function radarSection(radar) {
     </div>`;
 }
 
+// --- exploits ----------------------------------------------------------------------
+
+function risingTable() {
+  const rows = (typeof vulns !== "undefined" ? vulns : [])
+    .filter((v) => !v.done && v.epssWas != null && v.epss != null && v.epss > v.epssWas)
+    .map((v) => ({ v, delta: v.epss - v.epssWas }))
+    .sort((a, b) => b.delta - a.delta).slice(0, 8);
+  if (!rows.length) return `<p class="muted">Nothing is rising right now (history fills in over the first hour).</p>`;
+  return `<table class="data rising"><thead><tr><th>Vulnerability</th><th>Month ago</th><th>Now</th><th>Trend</th></tr></thead><tbody>${rows.map(({ v }) => {
+    const top = v.cveList.reduce((a, c) => (c.epss != null && (!a || c.epss > a.epss) ? c : a), null);
+    return `<tr class="click" data-open="${esc(v.id)}"><td>${esc(v.title)}</td><td>${(v.epssWas * 100).toFixed(1)}%</td><td><b>${(v.epss * 100).toFixed(1)}%</b></td><td>${sparkline(top?.epssSeries)}</td></tr>`;
+  }).join("")}</tbody></table>`;
+}
+
+function exploitBars() {
+  const open = (typeof vulns !== "undefined" ? vulns : []).filter((v) => !v.done && !v.usnPrimary);
+  const count = (k) => open.filter((v) => v.exploit === k).length;
+  const rows = [
+    { name: "Metasploit module", value: count("metasploit"), k: "metasploit" },
+    { name: "Exploit-DB entry", value: count("exploitdb"), k: "exploitdb" },
+    { name: "GitHub proof of concept", value: count("poc"), k: "poc" },
+    { name: "None known", value: open.filter((v) => !v.exploit).length, k: "none" },
+  ];
+  return hbars(rows, { label: (r) => r.name, value: (r) => r.value, tip: (r) => `${r.name}: ${r.value} of ${open.length} open vulnerabilities` });
+}
+
 // --- page ---------------------------------------------------------------------------
 
 function renderCharts() {
@@ -258,6 +284,12 @@ function renderCharts() {
       ${card("c-cwes", "Most common weakness types", "What kind of flaw attackers used, CISA's exploited list, last 12 months",
         c.kevCwes.length ? hbars(c.kevCwes, { label: (r) => r.name, value: (r) => r.count, tip: (r) => `${r.name} (${r.cwe}): ${r.count}` }) : `<p class="muted">Weakness types arrive with the next CISA update (within 3 hours).</p>`,
         table(["Weakness", "CWE", "Count"], c.kevCwes.map((r) => [esc(r.name), esc(r.cwe), r.count])))}
+    </div>
+    <div class="charts-grid">
+      ${card("c-rising", "Exploit chance rising fastest", "Open vulnerabilities whose exploit chance went up most in the last month (FIRST EPSS)",
+        risingTable(), null)}
+      ${card("c-exploits", "Open vulnerabilities with public exploit code", "Strongest signal per vulnerability",
+        exploitBars(), null)}
     </div>
     ${radarSection(c.radar)}
     <p class="muted small charts-foot">Sources: CISA Known Exploited Vulnerabilities, FIRST EPSS, NVD, Cloudflare Radar (attack data, CC BY-NC 4.0). Map outlines: Natural Earth.</p>`;

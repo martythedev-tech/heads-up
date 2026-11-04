@@ -13,6 +13,8 @@ Groups:
 """
 from datetime import datetime, timedelta, timezone
 
+import exploits as X
+
 GROUP_TITLES = {"act": "Act now", "soon": "Patch soon", "aware": "For awareness", "done": "Done"}
 STATE_LABEL = {"untriaged": "Not checked yet", "investigating": "Investigating",
                "not_affected": "Not affected", "patched": "Patched"}
@@ -115,6 +117,14 @@ def describe(v, releases, today):
     epss = _max(c.get("epss") for c in cves)
     exploited = bool(kev_dates)
     kev_last = kev_dates[-1] if kev_dates else None
+    # public exploit code, strongest first
+    n_msf = sum(len(c.get("msf") or []) for c in cves)
+    n_edb = sum(len(c.get("edb") or []) for c in cves)
+    n_poc = sum(len(c.get("poc") or []) for c in cves)
+    exploit = "metasploit" if n_msf else "exploitdb" if n_edb else "poc" if n_poc else None
+    # exploit-chance trend of the CVE most likely to be exploited
+    top = max((c for c in cves if c.get("epss") is not None), key=lambda c: c["epss"], default=None)
+    epss_trend, epss_was = X.trend(top.get("epssSeries")) if top else (None, None)
 
     fixed, pending = set(), set()
     if not v["usnPrimary"]:
@@ -153,7 +163,8 @@ def describe(v, releases, today):
         group = "act"
     elif exploited:
         group = "aware"
-    elif cf_urgent or (cvss or 0) >= 9 or prio == "critical" or (epss or 0) >= 0.5:
+    elif (cf_urgent or (cvss or 0) >= 9 or prio == "critical" or (epss or 0) >= 0.5
+          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7)):
         group = "soon"
     else:
         group = "aware"
@@ -176,6 +187,13 @@ def describe(v, releases, today):
                 [f"; updates are out for {', '.join(ubuntu['fixed']) or 'supported releases'}.", False]]
     elif cvss is not None and cvss >= 9:
         why += [["Critical severity", True], [f" ({cvss:.1f} out of 10).", False]]
+    if not done and exploit in ("metasploit", "exploitdb"):
+        why += [[" Exploit code is public", True],
+                [" (Metasploit module)." if exploit == "metasploit" else " (Exploit-DB).", False]]
+    elif not done and exploit == "poc" and not exploited:
+        why += [[" Proof-of-concept code is on GitHub.", False]]
+    if not done and not exploited and epss_trend == "rising":
+        why += [[" Exploit chance is rising", True], [f" (from {epss_was * 100:.1f}% a month ago).", False]]
     if not done and not v["usnPrimary"]:
         if ubuntu["fixed"]:
             why += [[f" Ubuntu fix out for {', '.join(ubuntu['fixed'])}.", False]]
@@ -189,6 +207,8 @@ def describe(v, releases, today):
         "cvss": cvss, "epss": epss, "exploited": exploited, "kevLast": kev_last,
         "ubuntu": ubuntu, "usnPrimary": v["usnPrimary"], "ubuntuPriority": prio,
         "cveCount": len(cves), "reportedBy": reported,
+        "exploit": exploit, "exploitCounts": {"msf": n_msf, "edb": n_edb, "poc": n_poc},
+        "epssTrend": epss_trend, "epssWas": epss_was,
         "zwId": zw["id"] if zw else None, "zwChanged": zw["changedAt"] if zw else None,
         "zwHeadline": zw.get("headline") if zw else None,
         "zwLatest": ((zw.get("extra") or {}).get("chronology") or [None])[0] if zw else None,

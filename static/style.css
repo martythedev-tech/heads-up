@@ -29,6 +29,8 @@
   --src-cisa-bg: #e8effd;
   --src-ubu: #b4366d;
   --src-ubu-bg: #fbe9f1;
+  --src-ex: #6250d6;
+  --src-ex-bg: #eeebfc;
   --shadow: 0 1px 2px rgb(16 24 40 / 5%);
   --radius: 8px;
   --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
@@ -58,6 +60,8 @@
     --src-cisa-bg: #17223b;
     --src-ubu: #f07aae;
     --src-ubu-bg: #36162a;
+    --src-ex: #9085e9;
+    --src-ex-bg: #221d45;
     --shadow: none;
     --series-1: #3987e5;
     --series-2: #d95926;
@@ -419,3 +423,15 @@ table.data td { padding: 6px 8px; border-bottom: 1px solid var(--line); font-var
 .radar-off p { margin: 6px 0 12px; }
 .charts-foot { margin-top: 18px; }
 ol.steps { margin: 6px 0 4px; padding-left: 20px; line-height: 1.6; }
+
+/* exploit code */
+.badge.ex { background: var(--src-ex-bg); color: var(--src-ex); }
+.box.src-ex { border-top: 3px solid var(--src-ex); }
+.sources-strip { grid-template-columns: repeat(4, 1fr); }
+.warn-text { color: var(--high); margin: 2px 0 6px; }
+.spark { vertical-align: middle; }
+.spark polyline { fill: none; stroke: var(--series-1); stroke-width: 1.5; stroke-linejoin: round; }
+.spark circle { fill: var(--series-1); }
+.spark-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+table.data tr.click { cursor: pointer; }
+table.data tr.click:hover td { background: var(--panel-2); }

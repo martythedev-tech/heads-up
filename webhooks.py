@@ -94,6 +94,9 @@ def facts(v):
     else:
         out.append(("Severity", V.severity_text(v["cvss"]) or "Not scored yet"))
         out.append(("Exploited", f"Yes (CISA, {V.short_date(v['kevLast'])})" if v["exploited"] else "Not confirmed"))
+    if not v["usnPrimary"]:
+        out.append(("Public exploit", {"metasploit": "Yes, Metasploit module", "exploitdb": "Yes, Exploit-DB",
+                                       "poc": "Proof-of-concept on GitHub"}.get(v.get("exploit"), "None known")))
     if v["reportedBy"]:
         out.append(("Reported by", ", ".join(v["reportedBy"])))
     if not v["usnPrimary"]:
