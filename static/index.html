@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heads Up</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" class="logo" aria-hidden="true"><path d="M12 2 3 6v6c0 5 3.8 9.4 9 10 5.2-.6 9-5 9-10V6l-9-4Z"/><path d="M12 7v6M12 16.5v.5" class="cut"/></svg>
+      <div>
+        <h1>Heads Up</h1>
+        <p class="sub">Critical vulnerabilities, one list, most urgent first</p>
+      </div>
+    </div>
+    <label class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+      <input id="q" type="search" placeholder="Search a product, CVE or keyword  ( / )" autocomplete="off">
+    </label>
+    <div class="who">
+      <button id="refresh" class="ghost" title="Fetch all sources now" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+      </button>
+      <button id="account" class="ghost">Sign in</button>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+  <section class="sources-strip" id="sources" aria-label="Where the information comes from"></section>
+
+  <nav class="summary" id="summary" aria-label="Summary"></nav>
+
+  <main id="groups"></main>
+
+  <footer class="foot">
+    Everything here is gathered automatically from public sources and links back to the original.
+    For internal use. <span id="version"></span>
+  </footer>
+</div>
+
+<div id="scrim" class="scrim" hidden></div>
+<aside id="drawer" class="drawer" hidden aria-modal="true" role="dialog"></aside>
+
+<dialog id="login">
+  <form method="dialog" id="login-form">
+    <h3>Sign in to track status</h3>
+    <p class="muted small">Anyone can read this page. Signing in lets you mark items as Investigating, Not affected or Patched.</p>
+    <label>Your name<input name="name" autocomplete="name" required maxlength="40"></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+    <p class="err" id="login-err"></p>
+    <div class="actions">
+      <button value="cancel" formnovalidate class="ghost">Cancel</button>
+      <button value="ok" class="primary">Sign in</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>

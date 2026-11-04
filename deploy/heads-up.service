@@ -1,0 +1,43 @@
+[Unit]
+Description=Heads Up (critical vulnerability dashboard)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/heads-up/app.py
+EnvironmentFile=/etc/heads-up/config.env
+Environment=PYTHONUNBUFFERED=1
+
+# The sign-in hash is encrypted at rest with the host key (systemd-creds) and
+# decrypted into a private tmpfs only this service can read.
+LoadCredentialEncrypted=login-hash:/etc/credstore.encrypted/heads-up.login-hash
+LoadCredential=tls-key:/etc/heads-up/tls/server.key
+
+DynamicUser=yes
+StateDirectory=heads-up
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+MemoryMax=400M
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

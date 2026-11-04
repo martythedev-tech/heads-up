@@ -1,0 +1,5 @@
+PROJECT_NOTES.md
+__pycache__/
+state/
+deploy/local.env
+deploy/config.env

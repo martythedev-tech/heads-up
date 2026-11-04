@@ -1,0 +1,519 @@
+"use strict";
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const STATE_LABEL = { untriaged: "Not checked yet", investigating: "Investigating", not_affected: "Not affected", patched: "Patched" };
+const REL_NAME = { resolute: "26.04", noble: "24.04", jammy: "22.04", focal: "20.04", stonking: "26.10", questing: "25.10" };
+const rel = (r) => REL_NAME[r] || r;
+
+const SOURCES = {
+  cf: { name: "Cloudflare", what: "Expert write-ups of the most important internet-facing vulnerabilities, with what to do.", feeds: ["zerowire"], url: "https://radar.cloudflare.com/security/zero-wire", stale: 2 * 3600 },
+  cisa: { name: "CISA", what: "US government list of vulnerabilities attackers are confirmed to be using.", feeds: ["kev"], url: "https://www.cisa.gov/known-exploited-vulnerabilities-catalog", stale: 8 * 3600 },
+  ubu: { name: "Ubuntu", what: "Security updates for Ubuntu and whether each release has a fix yet.", feeds: ["ubuntu", "osv"], url: "https://ubuntu.com/security/notices", stale: 3 * 3600 },
+};
+const GROUPS = {
+  act: { title: "Act now", explain: "Attackers are using these. Check whether you run them, then patch.", cls: "g-act" },
+  soon: { title: "Patch soon", explain: "Critical, but not confirmed as being exploited yet.", cls: "g-soon" },
+  aware: { title: "For awareness", explain: "Exploited over 2 weeks ago, reference briefings, and high-priority Ubuntu updates.", cls: "g-aware" },
+  done: { title: "Done", explain: "Marked Patched or Not affected.", cls: "g-done" },
+};
+
+let data = null;
+let vulns = [];
+let query = "";
+let openId = null;
+const shown = { act: 25, soon: 25, aware: 12, done: 25 };
+let showDone = false;
+
+const prevVisit = (() => { try { return Number(localStorage.getItem("hu.lastVisit")) || 0; } catch { return 0; } })();
+setTimeout(() => { try { localStorage.setItem("hu.lastVisit", String(Date.now() / 1000)); } catch {} }, 15000);
+
+// --- small helpers ---------------------------------------------------------------
+
+function ago(ts) {
+  if (!ts) return "never";
+  const s = Math.max(0, data.now - ts);
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400 * 2) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+function day(iso) {
+  if (!iso) return "";
+  const d = new Date(iso.length === 10 ? iso + "T00:00:00" : iso);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+}
+const daysAgoIso = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const isNew = (it) => prevVisit && it.changedAt > prevVisit;
+const max = (xs) => xs.reduce((a, b) => (b != null && (a == null || b > a) ? b : a), null);
+
+function severity(cvss) {
+  if (cvss == null) return null;
+  if (cvss >= 9) return { label: "Critical", cls: "crit" };
+  if (cvss >= 7) return { label: "High", cls: "high" };
+  if (cvss >= 4) return { label: "Medium", cls: "med" };
+  return { label: "Low", cls: "low" };
+}
+function exploitChance(epss) {
+  if (epss == null) return null;
+  const pct = epss * 100;
+  const label = epss >= 0.5 ? "Very high" : epss >= 0.1 ? "High" : epss >= 0.01 ? "Moderate" : "Low";
+  const cls = epss >= 0.5 ? "crit" : epss >= 0.1 ? "high" : epss >= 0.01 ? "med" : "low";
+  return { label, cls, pct: pct >= 10 ? pct.toFixed(0) : pct.toFixed(1) };
+}
+function kevShort(it) {
+  // "Ivanti Connect Secure Missing Authentication ... Vulnerability" -> "Missing Authentication ..."
+  let n = String(it.headline || "");
+  const vendor = it.tags[0] || "";
+  const product = it.title.toLowerCase().startsWith(vendor.toLowerCase() + " ") ? it.title.slice(vendor.length + 1) : it.title;
+  for (let i = 0; i < 3; i++) {
+    for (const w of [it.title, vendor, product]) if (w && n.toLowerCase().startsWith(w.toLowerCase() + " ")) n = n.slice(w.length + 1);
+  }
+  return n.replace(/ Vulnerabilit(y|ies)$/, "");
+}
+
+// --- one entry per vulnerability ----------------------------------------------------
+
+function buildVulns() {
+  const out = [];
+  const byCve = new Map();
+  const add = (v) => { out.push(v); for (const c of v.cveList) if (!byCve.has(c.id)) byCve.set(c.id, v); return v; };
+  const base = (primary) => ({ id: primary.id, primary, zw: null, kevs: [], usns: [], cveList: [] });
+
+  for (const it of data.items.filter((i) => i.source === "zerowire")) {
+    add(Object.assign(base(it), { zw: it, cveList: it.cves }));
+  }
+  for (const it of data.items.filter((i) => i.source === "kev")) {
+    const v = byCve.get(it.cves[0]?.id);
+    if (v) v.kevs.push(it);
+    else add(Object.assign(base(it), { kevs: [it], cveList: it.cves }));
+  }
+  for (const it of data.items.filter((i) => i.source === "ubuntu")) {
+    const linked = new Set();
+    for (const c of it.cves) { const v = byCve.get(c.id); if (v) linked.add(v); }
+    for (const v of linked) v.usns.push(it);
+    if (!linked.size && ["critical", "high"].includes(it.category)) {
+      out.push(Object.assign(base(it), { usns: [it], usnPrimary: true, cveList: it.cves }));
+    }
+  }
+  for (const v of out) describe(v);
+  return out;
+}
+
+function ubuntuSummary(v) {
+  const fixed = new Set(), pending = new Set();
+  for (const c of v.cveList) for (const p of c.ubuntu || []) for (const [r, st] of Object.entries(p.releases)) {
+    if (st === "released") fixed.add(r);
+    else if (["needed", "pending", "needs-triage"].includes(st)) pending.add(r);
+  }
+  for (const u of v.usns) for (const r of u.extra?.releases || []) fixed.add(r);
+  const order = (s) => data.releases.filter((r) => s.has(r)).map(rel);
+  return { fixed: order(fixed), pending: order(pending) };
+}
+
+function describe(v) {
+  const p = v.primary;
+  const cves = v.cveList;
+  const kevDates = cves.map((c) => c.kev?.added).filter(Boolean).sort();
+  v.cvss = max(cves.map((c) => c.cvss));
+  v.epss = max(cves.map((c) => c.epss));
+  v.exploited = kevDates.length > 0;
+  v.kevLast = kevDates[kevDates.length - 1];
+  v.ubuntu = ubuntuSummary(v);
+  v.items = [v.zw, ...v.kevs, ...v.usns].filter(Boolean);
+  v.isNew = v.items.some(isNew);
+  v.latest = max(v.items.map((i) => i.updated || i.published)) || "";
+  v.triage = p.triage;
+  v.done = ["patched", "not_affected"].includes(v.triage?.state);
+
+  if (v.zw) {
+    v.title = v.zw.title;
+    v.desc = v.zw.summary;
+  } else if (v.usnPrimary) {
+    v.title = p.title;
+    v.desc = p.summary;
+    v.ubuntuPriority = p.category;
+  } else {
+    v.title = `${p.title}: ${kevShort(p)}`;
+    v.desc = String(p.summary || "").replace(/^(\S+) \1 /, "$1 ");
+  }
+
+  const recentKev = v.exploited && v.kevLast >= daysAgoIso(14);
+  const cfUrgent = v.zw?.category === "Needs attention";
+  if (v.done) v.group = "done";
+  else if (v.exploited && (cfUrgent || recentKev)) v.group = "act";
+  else if (v.exploited) v.group = "aware";
+  else if (cfUrgent || (v.cvss ?? 0) >= 9 || v.ubuntuPriority === "critical" || (v.epss ?? 0) >= 0.5) v.group = "soon";
+  else v.group = "aware";
+
+  const parts = [];
+  if (v.done) {
+    parts.push(`Marked <b>${esc(STATE_LABEL[v.triage.state])}</b> by ${esc(v.triage.by)} ${ago(v.triage.at)}.`);
+  } else if (v.exploited) {
+    parts.push(`<b>Attackers are using this</b>, confirmed by CISA on ${esc(day(v.kevLast))}.`);
+    if (v.zw) parts.push(`Cloudflare says: <b>${esc(v.zw.headline)}</b>.`);
+    if (!recentKev && !cfUrgent) parts.push(`Reported over 2 weeks ago; check whether you run ${esc(v.kevs[0]?.title || "it")}.`);
+  } else if (v.zw) {
+    parts.push(`Cloudflare says: <b>${esc(v.zw.headline)}</b>.`);
+    parts.push("Not confirmed as exploited yet.");
+  } else if (v.usnPrimary) {
+    parts.push(`Ubuntu rates this <b>${esc(v.ubuntuPriority)}</b>; updates are out for ${esc(v.ubuntu.fixed.join(", ") || "supported releases")}.`);
+  } else if (v.cvss >= 9) {
+    parts.push(`<b>Critical severity</b> (${v.cvss.toFixed(1)} out of 10).`);
+  }
+  if (!v.done && !v.usnPrimary) {
+    if (v.ubuntu.fixed.length) parts.push(`Ubuntu fix out for ${esc(v.ubuntu.fixed.join(", "))}.`);
+    else if (v.ubuntu.pending.length) parts.push("Ubuntu fix still pending.");
+  }
+  v.why = parts.join(" ");
+}
+
+function matches(v) {
+  if (!query) return true;
+  const hay = [v.title, v.desc, v.id, ...v.items.flatMap((i) => [i.title, i.headline, i.tags.join(" "), i.extra?.packages?.join(" ")]),
+    ...v.cveList.slice(0, 50).map((c) => c.id)].join(" ").toLowerCase();
+  return query.split(/\s+/).every((w) => hay.includes(w));
+}
+
+// --- pieces ---------------------------------------------------------------------
+
+function badges(v) {
+  const b = [];
+  if (v.zw) b.push(`<span class="badge cf">Cloudflare <span class="detail">briefing</span></span>`);
+  if (v.exploited) b.push(`<span class="badge cisa">CISA <span class="detail">exploited</span></span>`);
+  if (v.ubuntu.fixed.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix out</span></span>`);
+  else if (v.ubuntu.pending.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix pending</span></span>`);
+  return b.join("");
+}
+
+function facts(v) {
+  const sev = severity(v.cvss);
+  const ex = exploitChance(v.epss);
+  const rows = [];
+  if (v.usnPrimary) {
+    const pr = v.ubuntuPriority;
+    rows.push(["Ubuntu priority", `<span class="v ${pr === "critical" ? "crit" : "high"}">${esc(pr[0].toUpperCase() + pr.slice(1))}</span>`]);
+    rows.push(["Fixes", `<span class="v none">${v.cveList.length} CVE${v.cveList.length === 1 ? "" : "s"}</span>`]);
+  } else {
+    rows.push(["Severity", sev ? `<span class="v ${sev.cls}">${sev.label} · ${v.cvss.toFixed(1)}</span>` : `<span class="v none">Not scored yet</span>`]);
+    rows.push(["Exploited", v.exploited ? `<span class="v crit">Yes</span>` : `<span class="v none">Not confirmed</span>`]);
+  }
+  if (v.exploited) rows.push(["Exploit chance", `<span class="v crit" title="CISA has confirmed attacks">Already happening</span>`]);
+  else rows.push(["Exploit chance", ex ? `<span class="v ${ex.cls}" title="${ex.pct}% chance of exploitation in the next 30 days (FIRST EPSS)">${ex.label}</span>` : `<span class="v none">Unknown</span>`]);
+  return `<div class="facts">${rows.map(([k, val]) => `<div class="fact"><span class="k">${k}</span>${val}</div>`).join("")}</div>`;
+}
+
+function triageCell(v) {
+  const s = v.triage?.state || "untriaged";
+  return `<span class="triage tri-${s}"><span class="tri-dot"></span>${STATE_LABEL[s]}</span>${v.triage && s !== "untriaged" ? `<span class="by">${esc(v.triage.by)}, ${ago(v.triage.at)}</span>` : ""}`;
+}
+
+// --- render ---------------------------------------------------------------------
+
+function renderSources() {
+  const src = data.sources || {};
+  $("#sources").innerHTML = Object.entries(SOURCES).map(([key, s]) => {
+    const st = s.feeds.map((f) => src[f] || {});
+    const ok = max(st.map((x) => x.ok_at));
+    const failing = st.some((x) => x.error && (!x.ok_at || x.err_at > x.ok_at));
+    const cls = failing ? "bad" : ok && data.now - ok < s.stale ? "ok" : ok ? "warn" : "";
+    const text = failing ? "Last check failed, showing older data" : ok ? `Checked ${ago(ok)}` : "Not checked yet";
+    return `<div class="src-card"><a class="badge ${key}" href="${s.url}" target="_blank" rel="noopener">${s.name}</a>
+      <div class="what">${s.what}</div>
+      <div class="fresh"><span class="dot ${cls}"></span>${text}</div></div>`;
+  }).join("");
+}
+
+function renderSummary(byGroup) {
+  $("#summary").innerHTML = Object.entries(GROUPS).map(([k, g]) => {
+    const n = byGroup[k].length;
+    return `<button class="sum ${g.cls} ${n ? "" : "zero"}" data-jump="${k}"><div class="n">${n}</div><div class="t">${g.title}</div><div class="d">${g.explain}</div></button>`;
+  }).join("");
+}
+
+function renderGroups(byGroup) {
+  $("#groups").innerHTML = Object.entries(GROUPS).map(([k, g]) => {
+    const list = byGroup[k];
+    const collapsed = k === "done" && !showDone;
+    const rows = collapsed ? "" : list.slice(0, shown[k]).map((v) => `
+      <button class="vrow" data-id="${esc(v.id)}">
+        <div>
+          <div class="v-title">${v.isNew ? `<span class="new">${v.items.some((i) => isNew(i) && i.firstSeen <= prevVisit) ? "UPDATED" : "NEW"}</span>` : ""}${esc(v.title)}</div>
+          <div class="v-desc">${esc(v.desc)}</div>
+          <div class="v-why">${v.why}</div>
+        </div>
+        ${facts(v)}
+        <div class="sources-col">${badges(v)}</div>
+        <div class="status-col">${triageCell(v)}</div>
+      </button>`).join("");
+    const more = !collapsed && list.length > shown[k] ? `<button class="more" data-more="${k}">Show ${list.length - shown[k]} more</button>` : "";
+    const toggle = k === "done" && list.length ? `<button class="ghost toggle" data-toggle-done>${showDone ? "Hide" : "Show"}</button>` : "";
+    const body = collapsed ? "" : list.length
+      ? `<div class="table"><div class="cols"><span>Vulnerability</span><span>Risk</span><span>Reported by</span><span>Our status</span></div>${rows}${more}</div>`
+      : `<div class="table"><div class="empty">${query ? "Nothing matches your search." : "Nothing here right now."}</div></div>`;
+    return `<section class="group ${g.cls}" id="group-${k}">
+      <div class="g-head"><h2>${g.title}</h2><span class="count">${list.length}</span><span class="explain">${g.explain}</span>${toggle}</div>
+      ${body}</section>`;
+  }).join("");
+}
+
+function render() {
+  if (!data) return;
+  vulns = buildVulns();
+  const byGroup = { act: [], soon: [], aware: [], done: [] };
+  const rank = (v) => (v.zw?.category === "Needs attention" ? 1 : 0);
+  for (const v of vulns.filter(matches)) byGroup[v.group].push(v);
+  for (const list of Object.values(byGroup)) {
+    list.sort((a, b) => (rank(b) - rank(a)) || String(b.kevLast || b.latest).localeCompare(String(a.kevLast || a.latest)));
+  }
+  renderSources();
+  renderSummary(byGroup);
+  renderGroups(byGroup);
+  $("#account").textContent = data.user ? data.user : "Sign in";
+  $("#account").title = data.user ? "Signed in. Click to sign out" : "Sign in to track status";
+  $("#account").hidden = !data.canSignIn && !data.user;
+  $("#refresh").hidden = !data.user;
+  $("#version").textContent = `Heads Up ${data.version}`;
+  if (openId) renderDrawer(openId, true);
+}
+
+// --- drawer -----------------------------------------------------------------------
+
+function section(body, name) {
+  const m = (body || "").match(new RegExp(`<h2>${name}</h2>([\\s\\S]*?)(?=<h[23]>|$)`));
+  return m ? m[1] : "";
+}
+
+function cfBox(v) {
+  const it = v.zw;
+  if (!it) return "";
+  const todo = section(it.body, "What to do now");
+  const who = section(it.body, "Who should investigate");
+  return `<div class="box src-cf"><h4><span class="badge cf">Cloudflare</span> says: ${esc(it.headline)}
+      <span class="muted small">checked ${esc(day(it.updated))}</span>
+      <a class="small" href="${esc(it.link)}" target="_blank" rel="noopener">Read on Cloudflare ↗</a></h4>
+    <div class="prose">
+      ${todo ? `<div class="label">What to do now</div>${todo}` : `<p>${esc(it.summary)}</p>`}
+      ${who ? `<div class="label">Who should check</div>${who}` : ""}
+      <details class="full"><summary>Full briefing (what happened, timeline, sources)</summary>${it.body}</details>
+    </div></div>`;
+}
+
+function cisaBox(v) {
+  const kevCves = v.cveList.filter((c) => c.kev);
+  if (!kevCves.length) return "";
+  const items = new Map(v.kevs.map((k) => [k.cves[0]?.id, k]));
+  return `<div class="box src-cisa"><h4><span class="badge cisa">CISA</span> confirmed exploited</h4>
+    ${kevCves.map((c) => {
+      const it = items.get(c.id);
+      return `<div class="kv">
+        <span class="k">Vulnerability</span><span><a class="mono" href="https://nvd.nist.gov/vuln/detail/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a>${it ? ` · ${esc(kevShort(it))}` : ""}</span>
+        <span class="k">Added to the list</span><span>${esc(day(c.kev.added))}</span>
+        <span class="k">Used in ransomware</span><span>${c.kev.ransomware === "Known" ? `<b class="v crit">Yes</b>` : "Not known"}</span>
+        <span class="k">Deadline (US agencies)</span><span>${esc(day(c.kev.due))}</span>
+      </div>`;
+    }).join(`<hr class="sep">`)}</div>`;
+}
+
+function ubuBox(v) {
+  const perCve = v.usnPrimary ? [] : v.cveList.filter((c) => c.ubuntu?.length);
+  const notIn = !v.usnPrimary && v.cveList.length && v.cveList.every((c) => c.ubuntuPriority === "not-in-ubuntu" || (c.ubuntu && !c.ubuntu.length));
+  if (!perCve.length && !v.usns.length) {
+    return notIn ? `<div class="box src-ubu"><h4><span class="badge ubu">Ubuntu</span> not affected</h4><p class="muted">Ubuntu doesn't ship the affected software, so Ubuntu updates won't fix this.</p></div>` : "";
+  }
+  const status = perCve.map((c) => `<div class="kv"><span class="k mono">${esc(c.id)}</span><div>${c.ubuntu.map((p) =>
+    `<div class="ubu-st"><b>${esc(p.package)}</b>${Object.entries(p.releases).map(([r, st]) =>
+      `<span class="st-${esc(st)}">${esc(rel(r))}: ${esc(st === "released" ? "fixed" : st === "DNE" ? "not shipped" : st)}</span>`).join("")}</div>`).join("")}</div></div>`).join("");
+  const notices = v.usns.map((u) => `<li><a href="${esc(u.link)}" target="_blank" rel="noopener">${esc(u.headline)}</a> · ${esc(u.title)} · ${esc(day(u.published))} · ${esc((u.extra?.releases || []).map(rel).join(", "))}</li>`).join("");
+  const primary = v.usnPrimary ? `<div class="label">Summary</div><p>${esc(v.primary.summary)}</p>
+    ${v.primary.extra?.packages?.length ? `<div class="label">Packages</div><p class="mono small">${esc(v.primary.extra.packages.join("  "))}</p>` : ""}
+    ${v.primary.extra?.instructions ? `<div class="label">How to update</div><p>${esc(v.primary.extra.instructions)}</p>` : ""}` : "";
+  return `<div class="box src-ubu"><h4><span class="badge ubu">Ubuntu</span> fixes</h4>
+    ${primary}
+    ${status ? `<div class="label">Fix status per release</div>${status}` : ""}
+    ${notices ? `<div class="label">Security notices</div><ul class="small">${notices}</ul>` : ""}</div>`;
+}
+
+function scoresBox(v) {
+  let list = v.cveList;
+  if (!list.length) return "";
+  if (list.length > 12) list = [...list].sort((a, b) => (b.epss ?? 0) - (a.epss ?? 0)).slice(0, 12);
+  const rows = list.map((c) => {
+    const sev = severity(c.cvss);
+    const ex = exploitChance(c.epss);
+    return `<tr><td><a class="mono" href="https://nvd.nist.gov/vuln/detail/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a></td>
+      <td>${sev ? `<span class="v ${sev.cls}">${sev.label} · ${c.cvss.toFixed(1)}</span>` : `<span class="muted">not scored yet</span>`}</td>
+      <td>${ex ? `<span class="v ${ex.cls}">${ex.label}</span> <span class="muted">(${ex.pct}%)</span>` : `<span class="muted">unknown</span>`}</td>
+      <td>${c.kev ? `<span class="v crit">Yes</span> <span class="muted">since ${esc(day(c.kev.added))}</span>` : `<span class="muted">not confirmed</span>`}</td></tr>`;
+  }).join("");
+  return `<div class="box"><h4>Scores per CVE${v.cveList.length > list.length ? ` <span class="muted small">(${list.length} most likely to be exploited, of ${v.cveList.length})</span>` : ""}</h4>
+    <table class="cves"><thead><tr><th>CVE</th><th>Severity<small>0–10, from NVD</small></th><th>Exploit chance<small>next 30 days, from FIRST</small></th><th>Exploited<small>from CISA</small></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function triageBox(v) {
+  const cur = v.triage?.state || "untriaged";
+  const disabled = data.user ? "" : "disabled";
+  const seg = Object.entries(STATE_LABEL).map(([k, label]) => `<button data-state="${k}" class="${k === cur ? "on" : ""}" ${disabled}>${label}</button>`).join("");
+  const last = v.triage ? `Last set by ${esc(v.triage.by)} ${ago(v.triage.at)}` : "No status yet";
+  return `<div class="box tri-box"><h4>Our status</h4>
+    <div class="seg" id="tri-seg">${seg}</div>
+    <textarea id="tri-note" placeholder="${data.user ? "Note: affected hosts, ticket number, workaround…" : "Sign in to set a status"}" ${disabled}>${esc(v.triage?.note || "")}</textarea>
+    <div class="actions"><span class="muted small">${last}</span>
+      ${data.user ? `<button class="primary" id="tri-save">Save</button>` : `<button class="ghost" id="tri-signin">Sign in</button>`}</div>
+    <ul class="hist" id="tri-hist"></ul></div>`;
+}
+
+function renderDrawer(id, keepScroll) {
+  const v = vulns.find((x) => x.id === id);
+  if (!v) return closeDrawer();
+  const drawer = $("#drawer");
+  const scroll = drawer.scrollTop;
+  drawer.innerHTML = `<div class="d-head">
+      <button class="ghost d-close" id="d-close" title="Close (Esc)">✕</button>
+      <div class="d-group ${GROUPS[v.group].cls}">${GROUPS[v.group].title}</div>
+      <h3>${esc(v.title)}</h3>
+      <p class="d-why">${v.why}</p>
+    </div>
+    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
+  drawer.hidden = false;
+  $("#scrim").hidden = false;
+  if (keepScroll) drawer.scrollTop = scroll;
+  loadHistory(v.id);
+  $("#d-close").onclick = closeDrawer;
+  for (const b of drawer.querySelectorAll("#tri-seg button")) b.onclick = () => {
+    for (const o of drawer.querySelectorAll("#tri-seg button")) o.classList.toggle("on", o === b);
+  };
+  const save = $("#tri-save");
+  if (save) save.onclick = () => saveTriage(v.id);
+  const si = $("#tri-signin");
+  if (si) si.onclick = openLogin;
+}
+
+async function loadHistory(id) {
+  try {
+    const rows = await (await fetch(`/api/history/${encodeURIComponent(id)}`)).json();
+    const el = $("#tri-hist");
+    if (el && openId === id) el.innerHTML = rows.slice(0, 8).map((r) =>
+      `<li>${new Date(r.at * 1000).toLocaleString()}: <b>${esc(r.by)}</b> set ${esc(STATE_LABEL[r.state])}${r.note ? `, “${esc(r.note.slice(0, 120))}”` : ""}</li>`).join("");
+  } catch {}
+}
+
+function openDrawer(id) {
+  openId = id;
+  renderDrawer(id);
+  $("#drawer").scrollTop = 0;
+  history.replaceState(null, "", `#${encodeURIComponent(id)}`);
+}
+function closeDrawer() {
+  openId = null;
+  $("#drawer").hidden = true;
+  $("#scrim").hidden = true;
+  history.replaceState(null, "", location.pathname);
+}
+
+async function saveTriage(id) {
+  const state = $("#tri-seg button.on")?.dataset.state || "untriaged";
+  const note = $("#tri-note").value;
+  const r = await post("/api/triage", { id, state, note });
+  if (!r.ok) return toast(r.status === 401 ? "Signed out. Sign in again" : "Couldn't save");
+  const it = data.items.find((i) => i.id === id);
+  it.triage = await r.json();
+  toast(`Marked ${STATE_LABEL[state]}`);
+  render();
+}
+
+// --- network ------------------------------------------------------------------------
+
+function post(url, body) {
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+
+async function load() {
+  try {
+    const r = await fetch("/api/state");
+    if (!r.ok) throw new Error(r.status);
+    data = await r.json();
+    render();
+    if (!openId && location.hash.length > 1) {
+      const id = decodeURIComponent(location.hash.slice(1));
+      if (vulns.some((v) => v.id === id)) openDrawer(id);
+    }
+  } catch (e) {
+    toast("Can't reach the server");
+  }
+}
+
+let toastTimer;
+function toast(msg) {
+  let el = $(".toast");
+  if (!el) { el = document.createElement("div"); el.className = "toast"; document.body.append(el); }
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (el.hidden = true), 2600);
+}
+
+// --- login --------------------------------------------------------------------------
+
+function openLogin() {
+  $("#login-err").textContent = "";
+  try { $("#login-form").name.value = localStorage.getItem("hu.name") || ""; } catch {}
+  $("#login").showModal();
+}
+
+$("#login-form").addEventListener("submit", async (e) => {
+  if (e.submitter?.value !== "ok") return;
+  e.preventDefault();
+  const f = e.target;
+  const r = await post("/api/login", { name: f.name.value, password: f.password.value });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    $("#login-err").textContent = j.error || (r.status === 429 ? "Too many attempts; wait 10 minutes" : "Sign-in failed");
+    return;
+  }
+  try { localStorage.setItem("hu.name", f.name.value); } catch {}
+  f.password.value = "";
+  $("#login").close();
+  await load();
+  toast("Signed in");
+});
+
+$("#account").onclick = async () => {
+  if (!data?.user) return openLogin();
+  await post("/api/logout", {});
+  await load();
+  toast("Signed out");
+};
+
+$("#refresh").onclick = async () => {
+  $("#refresh").classList.add("spin");
+  const r = await post("/api/refresh", {});
+  toast(r.ok ? "Checking all sources. This can take a few minutes" : "Couldn't start a refresh");
+  setTimeout(() => $("#refresh").classList.remove("spin"), 4000);
+  setTimeout(load, 15000);
+};
+
+// --- events -------------------------------------------------------------------------
+
+document.addEventListener("click", (e) => {
+  const more = e.target.closest("[data-more]");
+  if (more) { shown[more.dataset.more] += 25; return render(); }
+  if (e.target.closest("[data-toggle-done]")) { showDone = !showDone; return render(); }
+  const jump = e.target.closest("[data-jump]");
+  if (jump) {
+    if (jump.dataset.jump === "done" && !showDone) { showDone = true; render(); }
+    return $(`#group-${jump.dataset.jump}`).scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  const open = e.target.closest("[data-id]");
+  if (open && !e.target.closest("a")) return openDrawer(open.dataset.id);
+});
+$("#scrim").onclick = closeDrawer;
+$("#q").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && openId) closeDrawer();
+  if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) { e.preventDefault(); $("#q").focus(); }
+});
+
+load();
+setInterval(() => { if (!document.hidden && !$("#login").open && document.activeElement?.id !== "tri-note") load(); }, 120000);
