@@ -18,3 +18,7 @@ systemd with a private, name-constrained CA. Deploy from the laptop with
 Local run: `HU_DEV=1 HU_DEV_LOGIN_HASH=$(echo pw | deploy/hash-password) python3 app.py` → http://127.0.0.1:8765
 
 Content belongs to its sources; every item links back to the original.
+
+## License
+
+MIT (see LICENSE). The data it shows belongs to its sources (Cloudflare, CISA, Ubuntu, FIRST, NVD); check their terms before republishing it.
