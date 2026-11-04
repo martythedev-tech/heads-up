@@ -28,11 +28,12 @@ from pathlib import Path
 
 from aiohttp import ClientSession, ClientTimeout, web
 
+import charts as C
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -50,7 +51,7 @@ PUBLIC_URL = os.environ.get("HU_PUBLIC_URL") or (
     f"http://127.0.0.1:{HTTP_PORT}" if DEV else f"https://{SERVER_NAME or 'localhost'}:{HTTPS_PORT}")
 COOKIE = "hu_session"
 ASSET_VERSION = hashlib.sha256(b"".join(
-    (HERE / "static" / f).read_bytes() for f in ("app.js", "style.css", "index.html"))).hexdigest()[:10]
+    (HERE / "static" / f).read_bytes() for f in ("app.js", "charts.js", "style.css", "index.html"))).hexdigest()[:10]
 SESSION_DAYS = 30
 
 ZERO_WIRE_RSS = "https://radar.cloudflare.com/security/zero-wire/rss"
@@ -91,7 +92,7 @@ CREATE TABLE IF NOT EXISTS cve (
   ubuntu_priority TEXT, ubuntu_status TEXT, ubuntu_at REAL);
 CREATE TABLE IF NOT EXISTS kev (
   cve TEXT PRIMARY KEY, vendor TEXT, product TEXT, name TEXT, added TEXT,
-  due TEXT, ransomware TEXT, description TEXT, action TEXT);
+  due TEXT, ransomware TEXT, description TEXT, action TEXT, cwes TEXT);
 CREATE TABLE IF NOT EXISTS triage (
   item_id TEXT PRIMARY KEY, state TEXT, note TEXT, by TEXT, at REAL);
 CREATE TABLE IF NOT EXISTS triage_log (
@@ -113,6 +114,9 @@ def db_open():
     if cols and "username" not in cols:
         db.execute("DROP TABLE sessions")
     db.executescript(SCHEMA)
+    if "cwes" not in [r[1] for r in db.execute("PRAGMA table_info(kev)")]:
+        db.execute("ALTER TABLE kev ADD COLUMN cwes TEXT")
+    db.executescript(C.RADAR_SCHEMA)
     return db
 
 
@@ -225,6 +229,7 @@ class Fetcher:
         self.lock = asyncio.Lock()
         self.last_run = {}
         self.after_refresh = None
+        self.radar_token = lambda: None
         self.rounds = 0
 
     async def get(self, url, *, params=None, as_json=False):
@@ -254,7 +259,8 @@ class Fetcher:
             jobs = [("zerowire", 30 * 60, self.zero_wire),
                     ("kev", 3 * 3600, self.kev),
                     ("ubuntu", 60 * 60, self.ubuntu),
-                    ("enrich", 60 * 60, self.enrich)]
+                    ("enrich", 60 * 60, self.enrich),
+                    ("radar", 60 * 60, self.radar)]
             for name, every, job in jobs:
                 if force or self.due(name, every):
                     self.last_run[name] = now()
@@ -316,10 +322,11 @@ class Fetcher:
         self.db.execute("BEGIN")
         self.db.execute("DELETE FROM kev")
         self.db.executemany(
-            "INSERT OR REPLACE INTO kev VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO kev VALUES(?,?,?,?,?,?,?,?,?,?)",
             [(v["cveID"], v.get("vendorProject"), v.get("product"), v.get("vulnerabilityName"),
               v.get("dateAdded"), v.get("dueDate"), v.get("knownRansomwareCampaignUse"),
-              v.get("shortDescription"), v.get("requiredAction")) for v in vulns])
+              v.get("shortDescription"), v.get("requiredAction"), json.dumps(v.get("cwes") or []))
+             for v in vulns])
         self.db.execute("COMMIT")
         since = (datetime.now(timezone.utc) - timedelta(days=KEV_WINDOW_DAYS)).date().isoformat()
         ids = []
@@ -383,6 +390,17 @@ class Fetcher:
             })
         retire_missing(self.db, "ubuntu", ids)
         source_ok(self.db, "ubuntu", len(ids))
+
+    async def radar(self):
+        token = self.radar_token()
+        if not token:
+            return
+        errors = await C.radar_refresh(self.db, self.session, token)
+        if len(errors) == len(C.RADAR_QUERIES):
+            raise RuntimeError(errors[0])
+        for e in errors:
+            log(f"[radar] {e}")
+        source_ok(self.db, "radar", len(C.RADAR_QUERIES) - len(errors))
 
     async def enrich(self):
         rows = self.db.execute("SELECT source, cves FROM items WHERE active=1").fetchall()
@@ -678,6 +696,72 @@ async def api_webhook_test(request):
     return web.json_response({"ok": ok, "detail": detail})
 
 
+async def api_charts(request):
+    db = request.app["db"]
+    state = build_state(db)
+    out = C.build(db, state["vulns"], state["items"])
+    radar, at = C.radar_data(db)
+    src = db.execute("SELECT * FROM sources WHERE name='radar'").fetchone()
+    out["radar"] = {"configured": bool(radar_token(request.app)), "data": radar, "at": at,
+                    "error": src["error"] if src and src["error"] and (not src["ok_at"] or src["err_at"] > src["ok_at"]) else None}
+    return web.json_response(out)
+
+
+def radar_token(app):
+    hooks = app["hooks"]
+    row = app["db"].execute("SELECT value FROM meta WHERE key='radar_token'").fetchone()
+    if not row or not hooks.box:
+        return ""
+    try:
+        return hooks.box.open(bytes.fromhex(row[0]))
+    except Exception:
+        return ""
+
+
+async def api_settings(request):
+    need_admin(request)
+    src = request.app["db"].execute("SELECT * FROM sources WHERE name='radar'").fetchone()
+    return web.json_response({"radar": {"configured": bool(radar_token(request.app)),
+                                        "okAt": src["ok_at"] if src else None,
+                                        "error": src["error"] if src else None},
+                              "canStoreSecrets": request.app["hooks"].box is not None})
+
+
+async def api_settings_radar(request):
+    admin = need_admin(request)
+    app = request.app
+    body = await request.json()
+    if body.get("remove"):
+        app["db"].execute("DELETE FROM meta WHERE key='radar_token'")
+        app["db"].execute("DELETE FROM radar")
+        app["db"].execute("DELETE FROM sources WHERE name='radar'")
+        log(f"radar token removed by {admin['username']}")
+        return web.json_response({})
+    token = str(body.get("token") or "").strip()
+    if not token or len(token) > 200 or not app["hooks"].box:
+        return web.json_response({"error": "Paste the API token"}, status=400)
+    fetcher = app["fetcher"]
+    if fetcher.session is None:
+        fetcher.session = ClientSession(headers={"User-Agent": UA}, timeout=ClientTimeout(total=60))
+    try:
+        await C.radar_get(fetcher.session, token, *C.RADAR_TEST)
+    except Exception as e:
+        return web.json_response({"error": f"Cloudflare didn't accept the token: {e}"}, status=400)
+    app["db"].execute("INSERT OR REPLACE INTO meta VALUES('radar_token', ?)", (app["hooks"].box.seal(token).hex(),))
+    log(f"radar token set by {admin['username']}")
+
+    async def first_fetch():
+        try:
+            errors = await C.radar_refresh(app["db"], fetcher.session, token)
+            for e in errors:
+                log(f"[radar] {e}")
+            source_ok(app["db"], "radar", len(C.RADAR_QUERIES) - len(errors))
+        except Exception as e:
+            source_err(app["db"], "radar", e)
+    background(app, first_fetch())
+    return web.json_response({"ok": True})
+
+
 async def api_history(request):
     rows = request.app["db"].execute(
         "SELECT * FROM triage_log WHERE item_id=? ORDER BY at DESC LIMIT 30",
@@ -816,7 +900,7 @@ async def api_refresh(request):
 async def index(request):
     # Versioned asset URLs, so browsers fetch new ones after every deploy.
     page = (HERE / "static" / "index.html").read_text()
-    for asset in ("app.js", "style.css", "favicon.svg"):
+    for asset in ("app.js", "charts.js", "style.css", "favicon.svg"):
         page = page.replace(f"/static/{asset}", f"/static/{asset}?v={ASSET_VERSION}")
     return web.Response(text=page, content_type="text/html")
 
@@ -848,6 +932,10 @@ def make_app(db, fetcher):
     app["hooks"] = W.Webhooks(db, read_settings_key(), PUBLIC_URL)
     app["fresh"] = app["hooks"].is_empty()
     fetcher.after_refresh = lambda: notify_changes(app)
+    fetcher.radar_token = lambda: radar_token(app)
+    app.router.add_get("/api/charts", api_charts)
+    app.router.add_get("/api/settings", api_settings)
+    app.router.add_post("/api/settings/radar", api_settings_radar)
     app.router.add_post("/api/me/password", api_me_password)
     app.router.add_get("/api/users", api_users)
     app.router.add_post("/api/users/create", api_user_create)

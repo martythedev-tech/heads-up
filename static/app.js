@@ -516,13 +516,55 @@ async function openAccount() {
   await loadUsers();
 }
 
+let settingsData = null;
+
 async function loadUsers() {
   usersData = null;
+  settingsData = null;
   if (data.user?.role === "admin") {
-    const r = await fetch("/api/users");
+    const [r, s] = await Promise.all([fetch("/api/users"), fetch("/api/settings")]);
     if (r.ok) usersData = await r.json();
+    if (s.ok) settingsData = await s.json();
   }
   renderAccount();
+}
+
+function radarBox() {
+  const r = settingsData?.radar;
+  if (!r) return "";
+  const status = r.configured
+    ? (r.error && !r.okAt ? `<span class="bad-text">Turned on, but the last update failed: ${esc(r.error)}</span>` : `<span class="ok-text">On</span>${r.okAt ? ` · updated ${ago(r.okAt)}` : " · first update running"}`)
+    : `<span class="muted">Off</span>`;
+  return `<form class="box hook-form" id="radar-form">
+    <h4><span class="badge cf">Cloudflare Radar</span> attack maps · ${status}</h4>
+    <p class="small muted">Adds a world map of where attacks come from and who they target, attack volume, routes and industries to the Charts tab. It needs a free Cloudflare API token that can only read Radar:</p>
+    <ol class="small steps">
+      <li>Sign in (or sign up free) at <b>dash.cloudflare.com</b>.</li>
+      <li>Profile icon → <b>My Profile</b> → <b>API Tokens</b> → <b>Create Token</b> → <b>Custom token: Get started</b>.</li>
+      <li>Name it “Heads Up”. Under <b>Permissions</b> choose <b>Account</b> · <b>Radar</b> · <b>Read</b>. Nothing else.</li>
+      <li><b>Continue to summary</b> → <b>Create Token</b>, then copy it and paste it here.</li>
+    </ol>
+    <label>API token<input name="token" autocomplete="off" spellcheck="false" placeholder="${r.configured ? "Leave empty to keep the current token" : "Paste the token"}"></label>
+    <p class="err" id="radar-err"></p>
+    <div class="actions">${r.configured ? `<button type="button" class="ghost danger" id="radar-remove">Turn off</button>` : ""}<button class="primary">${r.configured ? "Replace token" : "Turn on"}</button></div>
+  </form>`;
+}
+
+function wireRadarBox() {
+  const f = $("#radar-form");
+  if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    if (!f.token.value.trim()) { $("#radar-err").textContent = "Paste the token first"; return; }
+    $("#radar-err").textContent = "Checking the token with Cloudflare…";
+    const r = await post("/api/settings/radar", { token: f.token.value.trim() });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $("#radar-err").textContent = j.error || "Couldn't save it"; return; }
+    toast("Cloudflare Radar is on. The maps fill in within a minute");
+    await loadUsers();
+  };
+  const rm = $("#radar-remove");
+  if (rm) rm.onclick = async () => { await post("/api/settings/radar", { remove: true }); toast("Cloudflare Radar turned off"); await loadUsers(); };
 }
 
 function revealBox() {
@@ -581,6 +623,7 @@ function renderAccount() {
       ${revealBox()}
       ${userForm ? userFormBox(userForm) : ""}
       ${users}
+      ${u.role === "admin" ? radarBox() : ""}
       <form class="box hook-form" id="pw-form">
         <h4>Change your password</h4>
         <label>Current password<input name="current" type="password" autocomplete="current-password" required></label>
@@ -595,6 +638,7 @@ function renderAccount() {
   $("#scrim").hidden = false;
   $("#d-close").onclick = closeDrawer;
   $("#signout").onclick = async () => { await post("/api/logout", {}); closeDrawer(); await load(); toast("Signed out"); };
+  wireRadarBox();
   const add = $("#user-add");
   if (add) add.onclick = () => { userForm = {}; revealed = null; renderAccount(); $("#user-form").username.focus(); };
   const copy = $("#pw-copy");
@@ -672,6 +716,7 @@ async function load() {
     if (!r.ok) throw new Error(r.status);
     data = await r.json();
     render();
+    if (typeof tab !== "undefined" && tab === "charts") loadCharts();
     if (!openId && location.hash.length > 1) {
       const id = decodeURIComponent(location.hash.slice(1));
       if (vulns.some((v) => v.id === id)) openDrawer(id);

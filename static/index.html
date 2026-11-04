@@ -7,6 +7,7 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/app.js" defer></script>
+<script src="/static/charts.js" defer></script>
 </head>
 <body>
 <header class="top">
@@ -36,11 +37,13 @@
 </header>
 
 <div class="page">
+  <nav class="tabs" aria-label="View"><button data-tab="list" class="on">List</button><button data-tab="charts">Charts</button></nav>
   <section class="sources-strip" id="sources" aria-label="Where the information comes from"></section>
 
   <nav class="summary" id="summary" aria-label="Summary"></nav>
 
   <main id="groups"></main>
+  <section id="charts" hidden></section>
 
   <footer class="foot">
     Everything here is gathered automatically from public sources and links back to the original.
