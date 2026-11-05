@@ -35,6 +35,21 @@ Sources, each with its own colour on the page:
 - **Exploit code**: [Metasploit](https://github.com/rapid7/metasploit-framework) exploit modules and [Exploit-DB](https://www.exploit-db.com) entries (daily), and proof-of-concept repositories on GitHub via [PoC-in-GitHub](https://github.com/nomi-sec/PoC-in-GitHub)
 - Scores per CVE: severity from [NVD](https://nvd.nist.gov) (CVSS), and exploit chance from [FIRST EPSS](https://www.first.org/epss/) with its trend over the last month
 
+**What we run** (signed-in users; admins edit): the products your
+organisation uses, each with the words that identify it in the feeds (e.g.
+FortiGate = "FortiGate, FortiOS"). Words match whole words in product names
+only (CISA/VulnCheck vendor and product, Microsoft product, Fortinet products,
+TrueNAS, Ubuntu packages, Cloudflare title and topics), never descriptions; a
+live preview shows what an entry would match. Matching entries are marked
+WE RUN, sorted first and can be shown alone ("Only what we run"). If attackers
+are using it, it goes to **Act now** whatever its age or source; if it is
+serious (CVSS 7+, Ubuntu high/critical, a Cloudflare briefing, TrueNAS
+High/Critical) to **Patch soon**. When the only link is a TrueNAS impact
+statement rating it Low/Medium on TrueNAS, the vendor's rating wins (Patch soon
+at most); a TrueNAS "not affected" statement doesn't count as a match.
+Versions are notes only. Editing the list doesn't send webhook alerts for the
+entries it moves.
+
 Not yet exploited items move to **Patch soon** when they are critical, rated
 critical by Ubuntu, likely to be exploited, publicly disclosed by Microsoft,
 or have a Metasploit module / Exploit-DB entry and High severity or more, or
@@ -299,7 +314,7 @@ one (the keyring entry is `service heads-up purpose admin`).
 
 A small aiohttp app (`app.py`; grouping in `vulns.py`, alerts in
 `webhooks.py`, accounts in `users.py`, charts and Radar in `charts.py`,
-exploit code in `exploits.py`, Microsoft in `msrc.py`, TrueNAS in `truenas.py`, Fortinet in `fortinet.py`, VulnCheck in
+exploit code in `exploits.py`, Microsoft in `msrc.py`, TrueNAS in `truenas.py`, Fortinet in `fortinet.py`, what we run in `inventory.py`, VulnCheck in
 `vulncheck.py`, transaction helper in `dbutil.py`) with a static front end and SQLite
 state, run by a hardened systemd unit (`DynamicUser`, read-only system,
 secrets via `systemd-creds`). Run it locally without TLS:

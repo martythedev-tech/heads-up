@@ -30,6 +30,7 @@ let query = "";
 let openId = null;
 const shown = { act: 25, soon: 25, aware: 12, done: 25 };
 let showDone = false;
+let oursOnly = (() => { try { return localStorage.getItem("hu.oursOnly") === "1"; } catch { return false; } })();
 
 const prevVisit = (() => { try { return Number(localStorage.getItem("hu.lastVisit")) || 0; } catch { return 0; } })();
 setTimeout(() => { try { localStorage.setItem("hu.lastVisit", String(Date.now() / 1000)); } catch {} }, 15000);
@@ -103,6 +104,7 @@ function buildVulns() {
 }
 
 function matches(v) {
+  if (oursOnly && data.inventoryCount && !(v.ours || []).length) return false;
   if (!query) return true;
   const hay = [v.title, v.desc, v.id, ...v.items.flatMap((i) => [i.title, i.headline, i.tags.join(" "), i.extra?.packages?.join(" ")]),
     ...v.cveList.slice(0, 50).map((c) => c.id)].join(" ").toLowerCase();
@@ -181,6 +183,15 @@ function renderSummary(byGroup) {
   }).join("");
 }
 
+function renderFilter() {
+  const bar = $("#filter-bar");
+  bar.hidden = !data.inventoryCount;
+  if (bar.hidden) return;
+  const n = vulns.filter((v) => (v.ours || []).length && !v.done).length;
+  bar.innerHTML = `<button class="ghost ${oursOnly ? "on" : ""}" data-ours-only>${oursOnly ? "✓ " : ""}Only what we run</button>
+    <span>${n} open item${n === 1 ? "" : "s"} affect${n === 1 ? "s" : ""} products on your list (marked <span class="ours">WE RUN</span>).</span>`;
+}
+
 function renderGroups(byGroup) {
   $("#groups").innerHTML = Object.entries(GROUPS).map(([k, g]) => {
     const list = byGroup[k];
@@ -188,7 +199,7 @@ function renderGroups(byGroup) {
     const rows = collapsed ? "" : list.slice(0, shown[k]).map((v) => `
       <button class="vrow" data-id="${esc(v.id)}">
         <div>
-          <div class="v-title">${v.isNew ? `<span class="new">${v.items.some((i) => isNew(i) && i.firstSeen <= prevVisit) ? "UPDATED" : "NEW"}</span>` : ""}${esc(v.title)}</div>
+          <div class="v-title">${(v.ours || []).length && !v.done ? `<span class="ours" title="You run ${esc(v.ours.join(", "))}">WE RUN</span>` : ""}${v.isNew ? `<span class="new">${v.items.some((i) => isNew(i) && i.firstSeen <= prevVisit) ? "UPDATED" : "NEW"}</span>` : ""}${esc(v.title)}</div>
           <div class="v-desc">${esc(v.desc)}</div>
           <div class="v-why">${v.why}</div>
         </div>
@@ -211,20 +222,22 @@ function render() {
   if (!data) return;
   vulns = buildVulns();
   const byGroup = { act: [], soon: [], aware: [], done: [] };
-  const rank = (v) => (v.zw?.category === "Needs attention" ? 1 : 0);
+  const rank = (v) => ((v.ours || []).length ? 2 : 0) + (v.zw?.category === "Needs attention" ? 1 : 0);
   for (const v of vulns.filter(matches)) byGroup[v.group].push(v);
   for (const list of Object.values(byGroup)) {
     list.sort((a, b) => (rank(b) - rank(a)) || String(b.kevLast || b.latest).localeCompare(String(a.kevLast || a.latest)));
   }
   renderSources();
   renderSummary(byGroup);
+  renderFilter();
   renderGroups(byGroup);
   $("#account").textContent = data.user ? data.user.name : "Sign in";
   $("#account").title = data.user ? "Your account" : "Sign in to track status";
   $("#account").hidden = !data.canSignIn && !data.user;
   $("#refresh").hidden = !data.user;
   $("#hooks-btn").hidden = data.user?.role !== "admin" || !data.webhooksAvailable;
-  if ((hooksOpen || accountOpen) && !data.user) closeDrawer();
+  $("#inv-btn").hidden = !data.user;
+  if ((hooksOpen || accountOpen || invOpen) && !data.user) closeDrawer();
   $("#version").textContent = `Heads Up ${data.version}`;
   if (openId) renderDrawer(openId, true);
 }
@@ -463,6 +476,7 @@ function openDrawer(id) {
 function closeDrawer() {
   openId = null;
   hooksOpen = false;
+  invOpen = false;
   accountOpen = false;
   $("#drawer").hidden = true;
   $("#scrim").hidden = true;
@@ -627,6 +641,129 @@ document.addEventListener("click", async (e) => {
     toast(j.ok ? "Test delivered. Check the channel" : `Test failed: ${j.detail || j.error || r.status}`);
     return loadHooks();
   }
+});
+
+// --- what we run -------------------------------------------------------------------------
+
+let invOpen = false;
+let invData = null;
+let invForm = null;         // null, {} (new) or an entry being edited
+let invConfirmDel = null;
+let previewTimer = null;
+
+async function openInventory() {
+  openId = null;
+  hooksOpen = false;
+  accountOpen = false;
+  invOpen = true;
+  invForm = null;
+  history.replaceState(null, "", location.pathname);
+  await loadInventory();
+}
+
+async function loadInventory() {
+  const r = await fetch("/api/inventory");
+  if (!r.ok) { toast("Sign in first"); return closeDrawer(); }
+  invData = await r.json();
+  renderInventory();
+}
+
+function invRow(e) {
+  const n = invData.counts[e.name] || 0;
+  return `<div class="box inv-row">
+    <div><b>${esc(e.name)}</b>${e.version ? ` <span class="muted small">· ${esc(e.version)}</span>` : ""}
+      <div class="chips">${e.terms.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>
+      ${e.note ? `<div class="small">${esc(e.note)}</div>` : ""}
+      <div class="meta">${n ? `<b>${n}</b> open item${n === 1 ? "" : "s"} right now` : "Nothing open right now"} · added by ${esc(e.by)}</div></div>
+    ${invData.canEdit ? `<div class="hook-actions"><button class="ghost" data-inv-edit="${e.id}">Edit</button>
+      <button class="ghost danger" data-inv-del="${e.id}">${invConfirmDel === e.id ? "Click again to remove" : "Remove"}</button></div>` : ""}
+  </div>`;
+}
+
+function invFormBox(e) {
+  const isNew = !e.id;
+  return `<form class="box hook-form" id="inv-form" autocomplete="off">
+    <h4>${isNew ? "Add a product" : `Edit “${esc(e.name)}”`}</h4>
+    <label>Product<input name="name" maxlength="60" list="inv-suggest" value="${esc(e.name || "")}" placeholder="e.g. FortiGate, Windows Server, Exchange Server, VMware ESXi"></label>
+    <datalist id="inv-suggest">${invData.suggestions.map((s) => `<option value="${esc(s)}">`).join("")}</datalist>
+    <label>Words that identify it in the feeds<input name="terms" maxlength="400" value="${esc((e.terms || []).join(", "))}" placeholder="Comma-separated. Empty = the product name"></label>
+    <p class="help small">Whole words, any case, matched against product names only (not descriptions). FortiGate shows up as <b>FortiOS</b> in Fortinet's and CISA's lists, so use “FortiGate, FortiOS”.</p>
+    <div class="inv-preview" id="inv-preview"></div>
+    <label>Version (optional, a note for people; not used for matching)<input name="version" maxlength="60" value="${esc(e.version || "")}" placeholder="e.g. 7.4.8"></label>
+    <label>Note (optional)<input name="note" maxlength="200" value="${esc(e.note || "")}" placeholder="e.g. 2 firewalls at HQ, owner: network team"></label>
+    <p class="err" id="inv-err"></p>
+    <div class="actions"><button type="button" class="ghost" id="inv-cancel">Cancel</button><button class="primary">${isNew ? "Add" : "Save"}</button></div>
+  </form>`;
+}
+
+function invTerms(form) {
+  return form.terms.value.trim() || form.name.value.trim();
+}
+
+function schedulePreview(form) {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const terms = invTerms(form);
+    const box = $("#inv-preview");
+    if (!box) return;
+    if (!terms) { box.innerHTML = ""; return; }
+    const r = await post("/api/inventory/preview", { terms });
+    const j = await r.json().catch(() => ({ count: 0, examples: [] }));
+    if (!$("#inv-preview")) return;
+    box.innerHTML = j.count
+      ? `Matches <b>${j.count}</b> open item${j.count === 1 ? "" : "s"} right now:<ul>${j.examples.map((x) => `<li><span class="muted">${esc(GROUPS[x.group]?.title || x.group)}:</span> ${esc(x.title)}</li>`).join("")}</ul>`
+      : `<span class="muted">Matches nothing open right now. That's fine: it's checked again every time something new comes in.</span>`;
+  }, 350);
+}
+
+function renderInventory() {
+  const drawer = $("#drawer");
+  const list = invData.entries;
+  drawer.innerHTML = `<div class="d-head">
+      <button class="ghost d-close" id="d-close" title="Close (Esc)">✕</button>
+      <div class="d-group">Settings</div>
+      <h3>What we run</h3>
+      <p class="d-why">The products your organisation uses. Anything on the list is marked <span class="ours">WE RUN</span> and sorted first: if attackers are using it, it goes to Act now whatever its age; if it's serious (severity 7+), to Patch soon.${invData.canEdit ? "" : " Ask an admin to change the list."}</p>
+    </div>
+    <div class="d-body">
+      ${invForm ? invFormBox(invForm) : ""}
+      ${list.map(invRow).join("") || (invForm ? "" : `<div class="box empty">Nothing on the list yet.</div>`)}
+      ${invForm || !invData.canEdit ? "" : `<button class="primary add-hook" id="inv-add">Add a product</button>`}
+    </div>`;
+  drawer.hidden = false;
+  $("#scrim").hidden = false;
+  $("#d-close").onclick = closeDrawer;
+  const add = $("#inv-add");
+  if (add) add.onclick = () => { invForm = {}; renderInventory(); };
+  const form = $("#inv-form");
+  if (form) {
+    form.name.oninput = form.terms.oninput = () => schedulePreview(form);
+    $("#inv-cancel").onclick = () => { invForm = null; renderInventory(); };
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const r = await post("/api/inventory/save", { id: invForm.id, name: form.name.value, terms: invTerms(form),
+        version: form.version.value, note: form.note.value });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { $("#inv-err").textContent = j.error || "Couldn't save"; return; }
+      invForm = null;
+      await Promise.all([loadInventory(), load()]);
+      toast("Saved");
+    };
+    schedulePreview(form);
+    form.name.focus();
+  }
+}
+
+document.addEventListener("click", async (e) => {
+  if (!invOpen) return;
+  const t = e.target.closest("[data-inv-edit],[data-inv-del]");
+  if (!t) return;
+  if (t.dataset.invEdit) { invForm = { ...invData.entries.find((x) => x.id === t.dataset.invEdit) }; return renderInventory(); }
+  if (invConfirmDel !== t.dataset.invDel) { invConfirmDel = t.dataset.invDel; return renderInventory(); }
+  invConfirmDel = null;
+  await post("/api/inventory/delete", { id: t.dataset.invDel });
+  toast("Removed");
+  await Promise.all([loadInventory(), load()]);
 });
 
 // --- account & users -------------------------------------------------------------------
@@ -953,6 +1090,7 @@ $("#login-form").addEventListener("submit", async (e) => {
 $("#account").onclick = () => (data?.user ? openAccount() : openLogin());
 
 $("#hooks-btn").onclick = openHooks;
+$("#inv-btn").onclick = openInventory;
 
 $("#refresh").onclick = async () => {
   $("#refresh").classList.add("spin");
@@ -968,6 +1106,11 @@ document.addEventListener("click", (e) => {
   const more = e.target.closest("[data-more]");
   if (more) { shown[more.dataset.more] += 25; return render(); }
   if (e.target.closest("[data-toggle-done]")) { showDone = !showDone; return render(); }
+  if (e.target.closest("[data-ours-only]")) {
+    oursOnly = !oursOnly;
+    try { localStorage.setItem("hu.oursOnly", oursOnly ? "1" : "0"); } catch {}
+    return render();
+  }
   const jump = e.target.closest("[data-jump]");
   if (jump) {
     if (jump.dataset.jump === "done" && !showDone) { showDone = true; render(); }
@@ -979,9 +1122,9 @@ document.addEventListener("click", (e) => {
 $("#scrim").onclick = closeDrawer;
 $("#q").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && (openId || hooksOpen || accountOpen) && !$("#login").open) closeDrawer();
+  if (e.key === "Escape" && (openId || hooksOpen || accountOpen || invOpen) && !$("#login").open) closeDrawer();
   if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) { e.preventDefault(); $("#q").focus(); }
 });
 
 load();
-setInterval(() => { if (!document.hidden && !$("#login").open && !hooksOpen && !accountOpen && document.activeElement?.id !== "tri-note") load(); }, 120000);
+setInterval(() => { if (!document.hidden && !$("#login").open && !hooksOpen && !accountOpen && !invOpen && document.activeElement?.id !== "tri-note") load(); }, 120000);

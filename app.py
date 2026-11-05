@@ -34,12 +34,13 @@ import exploits as X
 import msrc as MS
 import truenas as TN
 import fortinet as FN
+import inventory as INV
 import vulncheck as VC
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.11.0"
+VERSION = "0.12.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -131,6 +132,7 @@ def db_open():
     MS.migrate(db)
     TN.migrate(db)
     FN.migrate(db)
+    INV.migrate(db)
     VC.migrate(db)
     return db
 
@@ -713,7 +715,8 @@ def item_row(r, cves, triage):
     }
 
 
-def build_state(db):
+def build_state(db, inventory=None):
+    """inventory: the "what we run" entries to match (default: the saved list)."""
     kev = {r["cve"]: dict(r) for r in db.execute("SELECT cve, added, due, ransomware FROM kev")}
     cves = {}
     for r in db.execute("SELECT * FROM cve"):
@@ -743,7 +746,7 @@ def build_state(db):
              db.execute("SELECT * FROM items WHERE active=1 ORDER BY updated DESC, published DESC")]
     sources = {r["name"]: dict(r) for r in db.execute("SELECT * FROM sources")}
     return {"items": items, "sources": sources, "kevTotal": len(kev),
-            "vulns": V.build(items, UBUNTU_RELEASES)}
+            "vulns": V.build(items, UBUNTU_RELEASES, INV.entries(db) if inventory is None else inventory)}
 
 
 async def api_state(request):
@@ -753,6 +756,7 @@ async def api_state(request):
         "version": VERSION, "now": now(), "user": user,
         "canSignIn": request.app["users"].count() > 0, "releases": UBUNTU_RELEASES,
         "fortinetProducts": FN.PRODUCTS,
+        "inventoryCount": request.app["db"].execute("SELECT COUNT(*) FROM inventory").fetchone()[0],
         "webhooksAvailable": request.app["hooks"].box is not None,
         **state,
     })
@@ -887,6 +891,58 @@ async def api_webhook_test(request):
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"ok": ok, "detail": detail})
+
+
+async def api_inventory(request):
+    user = need_user(request)
+    db = request.app["db"]
+    items = [dict(r, tags=json.loads(r["tags"] or "[]"), extra=json.loads(r["extra"] or "{}"))
+             for r in db.execute("SELECT source, title, tags, extra FROM items WHERE active=1")]
+    counts = {}
+    for v in build_state(db)["vulns"]:
+        for name in v["ours"]:
+            counts[name] = counts.get(name, 0) + (v["group"] != "done")
+    return web.json_response({"entries": INV.entries(db), "counts": counts, "canEdit": user["role"] == "admin",
+                              "suggestions": INV.suggestions(items)})
+
+
+def inventory_changed(app):
+    # The person editing the list is looking at the page, so entries that move
+    # into Act now / Patch soon because of the edit are recorded, not announced.
+    app["hooks"].detect(build_state(app["db"])["vulns"], record_only=True)
+
+
+async def api_inventory_save(request):
+    user = need_admin(request)
+    try:
+        eid = INV.save(request.app["db"], await request.json(), user["name"])
+    except INV.InventoryError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    inventory_changed(request.app)
+    return web.json_response({"id": eid})
+
+
+async def api_inventory_delete(request):
+    need_admin(request)
+    INV.delete(request.app["db"], str((await request.json()).get("id") or ""))
+    inventory_changed(request.app)
+    return web.json_response({})
+
+
+async def api_inventory_preview(request):
+    """What a draft entry would match right now (open entries only)."""
+    need_user(request)
+    body = await request.json()
+    raw = body.get("terms")
+    terms = [t.strip() for t in (raw if isinstance(raw, list) else str(raw or "").split(",")) if len(t.strip()) >= 2][:INV.MAX_TERMS]
+    if not terms:
+        return web.json_response({"count": 0, "examples": []})
+    hits = [v for v in build_state(request.app["db"], [{"name": "draft", "terms": terms}])["vulns"]
+            if v["ours"] and v["group"] != "done"]
+    order = {"act": 0, "soon": 1, "aware": 2}
+    hits.sort(key=lambda v: v["latest"] or "", reverse=True)   # newest first...
+    hits.sort(key=lambda v: order.get(v["group"], 3))          # ...within Act now, Patch soon, For awareness
+    return web.json_response({"count": len(hits), "examples": [{"title": v["title"], "group": v["group"]} for v in hits[:8]]})
 
 
 async def api_charts(request):
@@ -1254,6 +1310,10 @@ def make_app(db, fetcher):
     app.router.add_post("/api/users/update", api_user_update)
     app.router.add_post("/api/users/reset", api_user_reset)
     app.router.add_post("/api/users/delete", api_user_delete)
+    app.router.add_get("/api/inventory", api_inventory)
+    app.router.add_post("/api/inventory/save", api_inventory_save)
+    app.router.add_post("/api/inventory/delete", api_inventory_delete)
+    app.router.add_post("/api/inventory/preview", api_inventory_preview)
     app.router.add_get("/api/webhooks", api_webhooks)
     app.router.add_post("/api/webhooks/save", api_webhook_save)
     app.router.add_post("/api/webhooks/delete", api_webhook_delete)
