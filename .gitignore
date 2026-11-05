@@ -3,3 +3,4 @@ __pycache__/
 state/
 deploy/local.env
 deploy/config.env
+.claude/settings.local.json
