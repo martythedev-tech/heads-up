@@ -33,12 +33,13 @@ from dbutil import batch
 import exploits as X
 import msrc as MS
 import truenas as TN
+import fortinet as FN
 import vulncheck as VC
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.10.0"
+VERSION = "0.11.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -129,6 +130,7 @@ def db_open():
     X.migrate(db)
     MS.migrate(db)
     TN.migrate(db)
+    FN.migrate(db)
     VC.migrate(db)
     return db
 
@@ -248,6 +250,7 @@ class Fetcher:
         self.on_routing = None
         self.on_patch_tuesday = None
         self.on_truenas = None
+        self.on_fortinet = None
         self.rounds = 0
 
     async def get(self, url, *, params=None, as_json=False):
@@ -281,6 +284,7 @@ class Fetcher:
                     ("msrc", 6 * 3600, self.msrc),
                     ("vulncheck", 6 * 3600, self.vulncheck),
                     ("truenas", 6 * 3600, self.truenas),
+                    ("fortinet", 6 * 3600, self.fortinet),
                     ("enrich", 60 * 60, self.enrich),
                     ("radar", 60 * 60, self.radar)]
             for name, every, job in jobs:
@@ -452,6 +456,18 @@ class Fetcher:
             source_ok(self.db, "truenas", n)
         if self.on_truenas:
             await self.on_truenas()
+
+    async def fortinet(self):
+        n = await FN.refresh(self.db, self.session)
+        with batch(self.db):
+            ids = []
+            for item in FN.items(self.db):
+                ids.append(item["id"])
+                upsert_item(self.db, item)
+            retire_missing(self.db, "fortinet", ids)
+            source_ok(self.db, "fortinet", n)
+        if self.on_fortinet:
+            await self.on_fortinet()
 
     async def exploits(self):
         n = await X.refresh_index(self.db, self.session)
@@ -712,6 +728,8 @@ def build_state(db):
         }
     for cve_id, info in MS.cve_info(db, cves).items():
         cves[cve_id]["msrc"] = info
+    for cve_id, info in FN.cve_info(db, cves).items():
+        cves[cve_id]["fortinet"] = info
     for cve_id, info in TN.cve_info(db, cves).items():
         cves[cve_id]["truenas"] = info
     for cve_id, info in VC.cve_info(db, cves).items():
@@ -734,6 +752,7 @@ async def api_state(request):
     return compressed(request, {
         "version": VERSION, "now": now(), "user": user,
         "canSignIn": request.app["users"].count() > 0, "releases": UBUNTU_RELEASES,
+        "fortinetProducts": FN.PRODUCTS,
         "webhooksAvailable": request.app["hooks"].box is not None,
         **state,
     })
@@ -787,6 +806,39 @@ async def announce_truenas(app):
             facts.append(("CVEs", r["cves"].replace(",", ", ")))
         body = " ".join(x for x in (r["impact"], r["todo"] or r["summary"]) if x)
         await app["hooks"].send_note("truenas", f"TrueNAS: {r['title']}", TN.shorten(body, 600), facts, r["link"])
+
+
+async def announce_fortinet(app):
+    """One webhook note per batch of new Fortinet advisories for your products (or exploited ones)."""
+    db = app["db"]
+    rows = [r for r in db.execute("SELECT * FROM fortinet ORDER BY cvss DESC") if FN.relevant(r)]
+    row = db.execute("SELECT value FROM meta WHERE key='fortinet_seen'").fetchone()
+    seen = set(json.loads(row[0])) if row else None
+    db.execute("INSERT OR REPLACE INTO meta VALUES('fortinet_seen', ?)",
+               (json.dumps(sorted({r["id"] for r in rows} | (seen or set()))),))
+    if seen is None:
+        return  # first run records what's already published
+    new = [FN.info(r) for r in rows if r["id"] not in seen]
+    if not new:
+        return
+    log("alerts: fortinet " + ", ".join(x["id"] for x in new))
+    lines = []
+    for x in new[:8]:
+        score = f"CVSS {x['cvss']:.1f}" if x["cvss"] is not None else "unscored"
+        flag = "EXPLOITED · " if x["exploited"] else ""
+        fix = f" Fix: {x['fixes'][0]}." if x["fixes"] else ""
+        mine = "" if x["yours"] else " (not one of your products)"
+        lines.append(f"{flag}{', '.join(x['yours'] or x['products'])}{mine} · {score}: {x['title']}.{fix}")
+    more = f" (+{len(new) - 8} more in Heads Up)" if len(new) > 8 else ""
+    exploited = sum(x["exploited"] for x in new)
+    mine = sum(bool(x["yours"]) for x in new)
+    title = f"Fortinet: {mine} new advisor{'y' if mine == 1 else 'ies'} for your products" if mine else "Fortinet:"
+    if exploited:
+        title += f"{',' if mine else ''} {exploited} exploited in the wild"
+    await app["hooks"].send_note("fortinet", title, " ".join(lines) + more,
+                                 [("Highest CVSS", f"{max((x['cvss'] or 0) for x in new):.1f}"),
+                                  ("Advisories", ", ".join(x["id"] for x in new[:6]))],
+                                 new[0]["link"] if len(new) == 1 else f"{app['hooks'].base_url}/")
 
 
 async def notify_changes(app):
@@ -1190,6 +1242,7 @@ def make_app(db, fetcher):
     fetcher.on_routing = lambda: announce_routing(app)
     fetcher.on_patch_tuesday = lambda: announce_patch_tuesday(app)
     fetcher.on_truenas = lambda: announce_truenas(app)
+    fetcher.on_fortinet = lambda: announce_fortinet(app)
     app.router.add_get("/api/charts", api_charts)
     app.router.add_get("/api/settings", api_settings)
     app.router.add_post("/api/settings/radar", api_settings_radar)

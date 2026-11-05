@@ -8,7 +8,10 @@ Groups:
          CISA added it in the last 14 days
   soon   not exploited, but Cloudflare says it needs attention, CVSS >= 9,
          Ubuntu rates it critical, EPSS >= 0.5, or TrueNAS rated its impact
-         High/Critical in the last 45 days
+         High/Critical in the last 45 days, or Fortinet rated an advisory for
+         your Fortinet products 9+ in the last 45 days
+         (Fortinet saying "exploited in the wild" counts as exploited; for a
+         product you don't run it stays in For awareness)
   aware  everything else (incl. exploited more than 14 days ago)
   done   marked Patched or Not affected
 """
@@ -17,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 import exploits as X
 import truenas as TN
+import fortinet as FN
 
 GROUP_TITLES = {"act": "Act now", "soon": "Patch soon", "aware": "For awareness", "done": "Done"}
 STATE_LABEL = {"untriaged": "Not checked yet", "investigating": "Investigating",
@@ -72,7 +76,7 @@ def build(items, releases):
     out, by_cve = [], {}
 
     def base(p):
-        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "tns": [], "usnPrimary": False}
+        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "tns": [], "fns": [], "usnPrimary": False}
 
     def add(v):
         out.append(v)
@@ -110,6 +114,15 @@ def build(items, releases):
             else:
                 v = base(it)
                 v["ms"] = [it]
+                add(v)
+    for it in items:
+        if it["source"] == "fortinet":
+            v = next((by_cve[c["id"]] for c in it["cves"] if c["id"] in by_cve), None)
+            if v:
+                v["fns"].append(it)
+            else:
+                v = base(it)
+                v["fns"] = [it]
                 add(v)
     for it in items:
         if it["source"] == "truenas":
@@ -159,9 +172,22 @@ def describe(v, releases, today):
     tn = max(tn_pages.values(), key=lambda t: (TN.LEVELS.index(t["level"]) if t.get("level") in TN.LEVELS else -1,
                                                t.get("published") or ""), default=None)
     tn_urgent = bool(tn) and tn.get("level") in ("high", "critical") and TN.is_recent(tn.get("published"), today=today)
-    exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates)
-    kev_last = kev_dates[-1] if kev_dates else (vc_dates[-1] if vc_dates else (ms_dates[-1] if ms_dates else None))
-    exploited_by = "CISA" if kev_dates else "VulnCheck" if vc_dates else "Microsoft" if ms_exploited else None
+    # what Fortinet said: advisories attached here, plus any advisory/statement naming one of its CVEs
+    fn_pages = {i["extra"]["id"]: i["extra"] for i in v["fns"]}
+    for c in cves:
+        if c.get("fortinet"):
+            fn_pages.setdefault(c["fortinet"]["id"], c["fortinet"])
+    fn = max(fn_pages.values(), key=lambda f: (bool(f.get("yours")), f.get("exploited"), f.get("cvss") or 0), default=None)
+    fn_mine = bool(fn) and bool(fn.get("yours"))
+    fn_dates = sorted(f["published"] for f in fn_pages.values() if f.get("exploited") and f.get("published"))
+    fn_urgent = fn_mine and (fn.get("cvss") or 0) >= 9 and TN.is_recent(fn.get("published"), days=FN.SOON_DAYS, today=today)
+    exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates) or bool(fn_dates)
+    kev_last = kev_dates[-1] if kev_dates else (vc_dates[-1] if vc_dates else (ms_dates[-1] if ms_dates else
+                                                                              (fn_dates[-1] if fn_dates else None)))
+    exploited_by = ("CISA" if kev_dates else "VulnCheck" if vc_dates else "Microsoft" if ms_exploited
+                    else "Fortinet" if fn_dates else None)
+    # exploited only according to Fortinet, in a Fortinet product you don't run
+    fn_not_mine = exploited_by == "Fortinet" and not fn_mine
     # how many days VulnCheck listed it before CISA did
     vc_lead = None
     if kev_dates and vc_dates and vc_dates[0] < kev_dates[0]:
@@ -203,6 +229,10 @@ def describe(v, releases, today):
     elif p["source"] == "truenas":
         title = p["title"] if "truenas" in p["title"].lower() else f"TrueNAS: {p['title']}"
         desc = p["summary"]
+    elif p["source"] == "fortinet":
+        product = ((p.get("extra") or {}).get("yours") or p.get("tags") or ["Fortinet"])[0]
+        title = p["title"] if product.lower() in p["title"].lower() else f"{product}: {p['title']}"
+        desc = p["summary"]
     else:
         title = f"{p['title']}: {kev_short(p)}"
         desc = str(p.get("summary") or "")
@@ -226,12 +256,14 @@ def describe(v, releases, today):
         group = "done"
     elif vc_only and not (vc_strong and recent_kev and not old_cve):
         group = "aware"
+    elif fn_not_mine:
+        group = "aware"
     elif exploited and (cf_urgent or recent_kev):
         group = "act"
     elif exploited:
         group = "aware"
     elif (cf_urgent or (cvss or 0) >= 9 or prio == "critical" or (epss or 0) >= 0.5
-          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7) or ms_disclosed or tn_urgent):
+          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7) or ms_disclosed or tn_urgent or fn_urgent):
         group = "soon"
     else:
         group = "aware"
@@ -242,6 +274,8 @@ def describe(v, releases, today):
         why += [["Marked ", False], [STATE_LABEL[triage["state"]], True], [f" by {triage['by']}.", False]]
     elif exploited:
         why += [["Attackers are using this", True], [f", confirmed by {exploited_by} on {short_date(kev_last)}.", False]]
+        if fn_not_mine:
+            why += [[f" Not one of your Fortinet products ({', '.join(fn.get('products') or [])}).", False]]
         if exploited_by == "VulnCheck":
             why += [[" Not on CISA's list yet.", False]]
             if group == "aware":
@@ -249,13 +283,16 @@ def describe(v, releases, today):
                 why += [[f" Check whether you run {product}." + (" (An older CVE, only recently reported as exploited.)" if old_cve else ""), False]]
         if zw:
             why += [[" Cloudflare says: ", False], [zw.get("headline") or "", True], [".", False]]
-        if not recent_kev and not cf_urgent:
+        if not recent_kev and not cf_urgent and not fn_not_mine:
             product = v["kevs"][0]["title"] if v["kevs"] else "it"
             why += [[f" Reported over 2 weeks ago; check whether you run {product}.", False]]
     elif ms_disclosed:
         why += [["Publicly disclosed", True], [" before Microsoft's fix (a zero-day); not seen exploited yet.", False]]
     elif zw:
         why += [["Cloudflare says: ", False], [zw.get("headline") or "", True], [". Not confirmed as exploited yet.", False]]
+    elif p["source"] == "fortinet" and fn:
+        why += [["Fortinet advisory for your ", False], [", ".join(fn["yours"] or fn["products"]), True],
+                [f" (CVSS {fn['cvss']:.1f})." if fn.get("cvss") is not None else ".", False]]
     elif p["source"] == "truenas" and tn:
         if tn.get("level") == "none":
             why += [["TrueNAS itself is not affected", True],
@@ -282,6 +319,15 @@ def describe(v, releases, today):
         why += [[" Proof-of-concept code is on GitHub.", False]]
     if not done and not exploited and epss_trend == "rising":
         why += [[" Exploit chance is rising", True], [f" (from {epss_was * 100:.1f}% a month ago).", False]]
+    if not done and fn and fn_mine:
+        if p["source"] != "fortinet":
+            why += [[" Affects your ", False], [", ".join(fn["yours"]), True], [f" (Fortinet {fn['id']}).", False]]
+        if fn.get("fixes"):
+            why += [[" Fortinet fix: ", False], [fn["fixes"][0], True], [".", False]]
+        if "virtual patch" in (fn.get("workaround") or "").lower():
+            why += [[" An IPS virtual patch is available.", False]]
+    elif not done and fn and fn.get("kind") == "statement" and p["source"] != "fortinet":
+        why += [[" Fortinet published a statement on this.", False]]
     if not done and tn and p["source"] != "truenas":
         why += [[" TrueNAS itself is not affected." if tn.get("level") == "none"
                  else f" TrueNAS rates the impact {tn.get('rating') or 'unrated'}.", False]]
@@ -296,7 +342,7 @@ def describe(v, releases, today):
             why += [[" Ubuntu fix still pending.", False]]
 
     reported = [s for s, on in (("Cloudflare", bool(zw)), ("CISA", bool(kev_dates)), ("VulnCheck", bool(vc_dates)),
-                                ("Microsoft", bool(ms_info)), ("TrueNAS", bool(tn)),
+                                ("Microsoft", bool(ms_info)), ("TrueNAS", bool(tn)), ("Fortinet", bool(fn)),
                                 ("Ubuntu", bool(ubuntu["fixed"] or ubuntu["pending"]))) if on]
     return {
         "id": v["id"], "group": group, "title": title, "desc": desc, "why": why,
@@ -312,9 +358,10 @@ def describe(v, releases, today):
         "msIds": [m["id"] for m in v["ms"]], "exploitedBy": exploited_by,
         "vcIds": [x["id"] for x in v["vcs"]], "vcLeadDays": vc_lead,
         "tnIds": [x["id"] for x in v["tns"]], "truenas": tn,
+        "fnIds": [x["id"] for x in v["fns"]], "fortinet": fn,
         "microsoft": ms_info[0] if ms_info else None,
         "latest": _max([i.get("updated") or i.get("published") for i in
-                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"]] if i]) or "",
+                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"]] if i]) or "",
         "triage": triage,
     }
 

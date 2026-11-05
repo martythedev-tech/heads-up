@@ -14,6 +14,7 @@ const SOURCES = {
   vc: { name: "VulnCheck KEV", what: "Exploited vulnerabilities, often earlier than CISA, with citations. Needs a free token.", feeds: ["vulncheck"], url: "https://vulncheck.com/kev", stale: 8 * 3600 },
   ms: { name: "Microsoft", what: "Patch Tuesday: Microsoft's monthly security fixes, including zero-days.", feeds: ["msrc"], url: "https://msrc.microsoft.com/update-guide", stale: 8 * 3600 },
   tn: { name: "TrueNAS", what: "iXsystems' advisories, and how much wider CVEs (kernel, Samba, ...) matter on TrueNAS.", feeds: ["truenas"], url: "https://security.truenas.com/", stale: 8 * 3600 },
+  fn: { name: "Fortinet", what: "Fortinet PSIRT advisories for your products ({products}), with fixed versions.", feeds: ["fortinet"], url: "https://www.fortiguard.com/psirt", stale: 8 * 3600 },
   ex: { name: "Exploit code", what: "Public attack code: Metasploit modules, Exploit-DB and proof-of-concepts on GitHub.", feeds: ["exploits", "poc"], url: "https://www.exploit-db.com", stale: 26 * 3600 },
 };
 const GROUPS = {
@@ -91,8 +92,9 @@ function buildVulns() {
     v.ms = (src.msIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.vcs = (src.vcIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.tns = (src.tnIds || []).map((id) => byId.get(id)).filter(Boolean);
+    v.fns = (src.fnIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.cveList = v.primary.cves || [];
-    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms, ...v.vcs, ...v.tns].filter(Boolean);
+    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms, ...v.vcs, ...v.tns, ...v.fns].filter(Boolean);
     v.isNew = v.items.some(isNew);
     v.done = v.group === "done";
     v.why = src.why.map(([t, bold]) => (bold ? `<b>${esc(t)}</b>` : esc(t))).join("");
@@ -116,6 +118,11 @@ function badges(v) {
   const onCisa = v.cveList.some((c) => c.kev), onVc = v.cveList.some((c) => c.vulncheck);
   if (onVc && (!onCisa || v.vcLeadDays)) b.push(`<span class="badge vc">VulnCheck KEV <span class="detail">${onCisa ? `${v.vcLeadDays} d before CISA` : "exploited"}</span></span>`);
   if (v.microsoft) b.push(`<span class="badge ms">Microsoft <span class="detail">${v.microsoft.exploited ? "zero-day, fixed" : v.microsoft.disclosed ? "disclosed, fixed" : "fix out"}</span></span>`);
+  if (v.fortinet) {
+    const f = v.fortinet;
+    const detail = f.exploited ? "exploited" : f.kind === "statement" ? "statement" : f.yours.length ? "your product" : "advisory";
+    b.push(`<span class="badge fn">Fortinet <span class="detail">${detail}</span></span>`);
+  }
   if (v.truenas) b.push(`<span class="badge tn">TrueNAS <span class="detail">${v.truenas.level === "none" ? "not affected" : v.truenas.rating ? `impact ${esc(v.truenas.rating.toLowerCase())}` : "notice"}</span></span>`);
   if (v.exploit) b.push(`<span class="badge ex">${{ metasploit: "Metasploit", exploitdb: "Exploit-DB", poc: "GitHub" }[v.exploit]} <span class="detail">${v.exploit === "poc" ? "proof of concept" : "exploit"}</span></span>`);
   if (v.ubuntu.fixed.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix out</span></span>`);
@@ -162,7 +169,7 @@ function renderSources() {
     const cls = failing ? "bad" : ok && data.now - ok < s.stale ? "ok" : ok ? "warn" : "";
     const text = failing ? "Last check failed, showing older data" : ok ? `Checked ${ago(ok)}` : "Not checked yet";
     return `<div class="src-card"><a class="badge ${key}" href="${s.url}" target="_blank" rel="noopener">${s.name}</a>
-      <div class="what">${s.what}</div>
+      <div class="what">${s.what.replace("{products}", esc((data.fortinetProducts || []).join(", ").replace("FortiOS", "FortiGate/FortiOS")))}</div>
       <div class="fresh"><span class="dot ${cls}"></span>${text}</div></div>`;
   }).join("");
 }
@@ -319,6 +326,28 @@ function msBox(v) {
     <p class="small muted">Install the ${esc(rows[0].msrc.releaseLabel)} updates (Windows Update, WSUS or Intune) on affected systems.</p></div>`;
 }
 
+function fnBox(v) {
+  const pages = new Map();
+  for (const i of v.fns) pages.set(i.extra.id, i.extra);
+  for (const c of v.cveList) if (c.fortinet && !pages.has(c.fortinet.id)) pages.set(c.fortinet.id, c.fortinet);
+  if (!pages.size) return "";
+  return [...pages.values()].slice(0, 3).map((f) => {
+    const sev = severity(f.cvss);
+    const prods = f.products.map((p) => f.yours.includes(p) ? `<b>${esc(p)}</b>` : esc(p)).join(", ");
+    return `<div class="box src-fn"><h4><span class="badge fn">Fortinet</span> ${f.kind === "statement" ? "statement" : "PSIRT advisory"} · ${esc(day(f.published))}</h4>
+    <div class="kv">
+      <span class="k">Advisory</span><span><a href="${esc(f.link)}" target="_blank" rel="noopener">${esc(f.id)}</a> · ${esc(f.title)}</span>
+      ${f.products.length ? `<span class="k">Products</span><span>${prods}${f.yours.length ? ` <span class="muted small">(bold = yours)</span>` : ` <span class="muted small">(none of yours)</span>`}</span>` : ""}
+      ${f.cvss != null ? `<span class="k">Fortinet's score</span><span><b class="v ${sev ? sev.cls : "none"}">${sev ? sev.label : ""} · ${f.cvss.toFixed(1)}</b></span>` : ""}
+      ${f.exploited ? `<span class="k">Exploited</span><span><b class="v crit">Fortinet says it is exploited in the wild</b></span>` : ""}
+      ${f.fixes.length ? `<span class="k">Fixed in</span><span><ul class="small plain fn-fixes">${f.fixes.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></span>` : ""}
+    </div>
+    ${f.workaround ? `<p class="small tn-impact"><b>Workaround / virtual patch:</b> ${esc(f.workaround)}</p>` : ""}
+    ${f.kind === "statement" && f.summary ? `<p class="small tn-impact">${esc(f.summary.slice(0, 400))}${f.summary.length > 400 ? "…" : ""}</p>` : ""}
+    <p class="small muted">Fortinet's advisory lists every affected version and any further steps.</p></div>`;
+  }).join("");
+}
+
 function tnBox(v) {
   // pages attached to this entry, then pages that mention one of its CVEs
   const pages = new Map();
@@ -401,7 +430,7 @@ function renderDrawer(id, keepScroll) {
       <h3>${esc(v.title)}</h3>
       <p class="d-why">${v.why}</p>
     </div>
-    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${vcBox(v)}${msBox(v)}${tnBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
+    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${vcBox(v)}${msBox(v)}${fnBox(v)}${tnBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
   drawer.hidden = false;
   $("#scrim").hidden = false;
   if (keepScroll) drawer.scrollTop = scroll;
@@ -472,6 +501,7 @@ const EVENT_HELP = {
   status: "Someone marks an item Investigating, Not affected or Patched.",
   patch: "Microsoft publishes a month's security updates: one summary with zero-days, criticals and what to patch first.",
   routing: "A route hijack or leak involves one of the networks you watch (set under Cloudflare Radar).",
+  fortinet: "Fortinet publishes advisories for your Fortinet products (or says one is exploited): one message per batch with scores and fixed versions.",
   truenas: "iXsystems publishes a new TrueNAS advisory or impact statement: its TrueNAS rating, fix version and what to do.",
 };
 
