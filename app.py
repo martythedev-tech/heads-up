@@ -32,12 +32,13 @@ import charts as C
 from dbutil import batch
 import exploits as X
 import msrc as MS
+import truenas as TN
 import vulncheck as VC
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -127,6 +128,7 @@ def db_open():
     db.executescript(C.RADAR_SCHEMA)
     X.migrate(db)
     MS.migrate(db)
+    TN.migrate(db)
     VC.migrate(db)
     return db
 
@@ -245,6 +247,7 @@ class Fetcher:
         self.watch_asns = lambda: []
         self.on_routing = None
         self.on_patch_tuesday = None
+        self.on_truenas = None
         self.rounds = 0
 
     async def get(self, url, *, params=None, as_json=False):
@@ -277,6 +280,7 @@ class Fetcher:
                     ("exploits", 24 * 3600, self.exploits),
                     ("msrc", 6 * 3600, self.msrc),
                     ("vulncheck", 6 * 3600, self.vulncheck),
+                    ("truenas", 6 * 3600, self.truenas),
                     ("enrich", 60 * 60, self.enrich),
                     ("radar", 60 * 60, self.radar)]
             for name, every, job in jobs:
@@ -436,6 +440,18 @@ class Fetcher:
             source_ok(self.db, "msrc", n)
         if self.on_patch_tuesday:
             await self.on_patch_tuesday()
+
+    async def truenas(self):
+        n = await TN.refresh(self.db, self.session)
+        with batch(self.db):
+            ids = []
+            for item in TN.items(self.db):
+                ids.append(item["id"])
+                upsert_item(self.db, item)
+            retire_missing(self.db, "truenas", ids)
+            source_ok(self.db, "truenas", n)
+        if self.on_truenas:
+            await self.on_truenas()
 
     async def exploits(self):
         n = await X.refresh_index(self.db, self.session)
@@ -696,6 +712,8 @@ def build_state(db):
         }
     for cve_id, info in MS.cve_info(db, cves).items():
         cves[cve_id]["msrc"] = info
+    for cve_id, info in TN.cve_info(db, cves).items():
+        cves[cve_id]["truenas"] = info
     for cve_id, info in VC.cve_info(db, cves).items():
         cves[cve_id]["vulncheck"] = info
     for cve_id, ex in X.exploit_rows(db, cves).items():
@@ -746,6 +764,29 @@ async def announce_patch_tuesday(app):
         [("Exploited (zero-days)", str(latest["exploited"])), ("Critical", str(latest["critical"])),
          ("Publicly disclosed", str(latest["disclosed"])), ("Patch first", ", ".join(f["cve"] for f in latest["first"][:5]) or "–")],
         f"{app['hooks'].base_url}/")
+
+
+async def announce_truenas(app):
+    """Tell webhooks once about each new TrueNAS advisory or impact statement."""
+    db = app["db"]
+    rows = [dict(r) for r in db.execute("SELECT * FROM truenas ORDER BY published DESC")]
+    row = db.execute("SELECT value FROM meta WHERE key='truenas_seen'").fetchone()
+    seen = set(json.loads(row[0])) if row else None
+    db.execute("INSERT OR REPLACE INTO meta VALUES('truenas_seen', ?)",
+               (json.dumps(sorted({r["id"] for r in rows} | (seen or set()))),))
+    if seen is None:
+        return  # first run records what's already published
+    for r in [r for r in rows if r["id"] not in seen][:5]:
+        log(f"alerts: truenas {r['id']}")
+        facts = [("TrueNAS rating", r["rating"] or "–")]
+        if r["upstream"]:
+            facts.append(("Upstream rating", TN.shorten(r["upstream"], 120)))
+        if r["fixed_in"]:
+            facts.append(("Fixed in", r["fixed_in"]))
+        if r["cves"]:
+            facts.append(("CVEs", r["cves"].replace(",", ", ")))
+        body = " ".join(x for x in (r["impact"], r["todo"] or r["summary"]) if x)
+        await app["hooks"].send_note("truenas", f"TrueNAS: {r['title']}", TN.shorten(body, 600), facts, r["link"])
 
 
 async def notify_changes(app):
@@ -1148,6 +1189,7 @@ def make_app(db, fetcher):
     fetcher.watch_asns = lambda: watch_asns(app)
     fetcher.on_routing = lambda: announce_routing(app)
     fetcher.on_patch_tuesday = lambda: announce_patch_tuesday(app)
+    fetcher.on_truenas = lambda: announce_truenas(app)
     app.router.add_get("/api/charts", api_charts)
     app.router.add_get("/api/settings", api_settings)
     app.router.add_post("/api/settings/radar", api_settings_radar)

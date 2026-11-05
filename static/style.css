@@ -35,6 +35,8 @@
   --src-ms-bg: #e3f4ec;
   --src-vc: #0b6e8a;
   --src-vc-bg: #e1f2f7;
+  --src-tn: #3d5a80;
+  --src-tn-bg: #e8edf4;
   --shadow: 0 1px 2px rgb(16 24 40 / 5%);
   --radius: 8px;
   --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
@@ -70,6 +72,8 @@
     --src-ms-bg: #10291f;
     --src-vc: #4cc3e3;
     --src-vc-bg: #0e2a33;
+    --src-tn: #9db4d6;
+    --src-tn-bg: #1a2433;
     --shadow: none;
     --series-1: #3987e5;
     --series-2: #d95926;
@@ -464,6 +468,12 @@ table.data tr.click:hover td { background: var(--panel-2); }
 /* vulncheck */
 .badge.vc { background: var(--src-vc-bg); color: var(--src-vc); }
 .box.src-vc { border-top: 3px solid var(--src-vc); }
+
+/* truenas */
+.badge.tn { background: var(--src-tn-bg); color: var(--src-tn); }
+.box.src-tn { border-top: 3px solid var(--src-tn); }
+.sources-strip { grid-template-columns: repeat(4, 1fr); }
+.box .tn-impact { margin: 6px 0 0; }
 .sources-strip { grid-template-columns: repeat(3, 1fr); }
 ul.plain { list-style: none; padding: 0; margin: 0; }
 

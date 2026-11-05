@@ -7,13 +7,16 @@ Groups:
   act    exploited (CISA) and either Cloudflare says it needs attention or
          CISA added it in the last 14 days
   soon   not exploited, but Cloudflare says it needs attention, CVSS >= 9,
-         Ubuntu rates it critical, or EPSS >= 0.5
+         Ubuntu rates it critical, EPSS >= 0.5, or TrueNAS rated its impact
+         High/Critical in the last 45 days
   aware  everything else (incl. exploited more than 14 days ago)
   done   marked Patched or Not affected
 """
+import re
 from datetime import datetime, timedelta, timezone
 
 import exploits as X
+import truenas as TN
 
 GROUP_TITLES = {"act": "Act now", "soon": "Patch soon", "aware": "For awareness", "done": "Done"}
 STATE_LABEL = {"untriaged": "Not checked yet", "investigating": "Investigating",
@@ -69,7 +72,7 @@ def build(items, releases):
     out, by_cve = [], {}
 
     def base(p):
-        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "usnPrimary": False}
+        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "tns": [], "usnPrimary": False}
 
     def add(v):
         out.append(v)
@@ -109,6 +112,16 @@ def build(items, releases):
                 v["ms"] = [it]
                 add(v)
     for it in items:
+        if it["source"] == "truenas":
+            # one page can cover several CVEs (Samba, Lodash); join the first one already listed
+            v = next((by_cve[c["id"]] for c in it["cves"] if c["id"] in by_cve), None)
+            if v:
+                v["tns"].append(it)
+            else:
+                v = base(it)
+                v["tns"] = [it]
+                add(v)
+    for it in items:
         if it["source"] != "ubuntu":
             continue
         linked = {}
@@ -138,6 +151,14 @@ def describe(v, releases, today):
     ms_disclosed = any(m["disclosed"] for m in ms_info)
     ms_dates = sorted(i["published"] for i in v["ms"] if i.get("extra", {}).get("exploited") and i.get("published"))
     vc_dates = sorted(c["vulncheck"]["added"] for c in cves if c.get("vulncheck") and c["vulncheck"].get("added"))
+    # what TrueNAS said: pages attached to this entry, plus any page naming one of its CVEs
+    tn_pages = {i["link"]: i["extra"] for i in v["tns"]}
+    for c in cves:
+        if c.get("truenas"):
+            tn_pages.setdefault(c["truenas"]["link"], c["truenas"])
+    tn = max(tn_pages.values(), key=lambda t: (TN.LEVELS.index(t["level"]) if t.get("level") in TN.LEVELS else -1,
+                                               t.get("published") or ""), default=None)
+    tn_urgent = bool(tn) and tn.get("level") in ("high", "critical") and TN.is_recent(tn.get("published"), today=today)
     exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates)
     kev_last = kev_dates[-1] if kev_dates else (vc_dates[-1] if vc_dates else (ms_dates[-1] if ms_dates else None))
     exploited_by = "CISA" if kev_dates else "VulnCheck" if vc_dates else "Microsoft" if ms_exploited else None
@@ -179,6 +200,9 @@ def describe(v, releases, today):
     elif p["source"] == "msrc":
         title = f"{(p.get('tags') or ['Microsoft'])[0]}: {p['title']}"
         desc = p["summary"]
+    elif p["source"] == "truenas":
+        title = p["title"] if "truenas" in p["title"].lower() else f"TrueNAS: {p['title']}"
+        desc = p["summary"]
     else:
         title = f"{p['title']}: {kev_short(p)}"
         desc = str(p.get("summary") or "")
@@ -207,7 +231,7 @@ def describe(v, releases, today):
     elif exploited:
         group = "aware"
     elif (cf_urgent or (cvss or 0) >= 9 or prio == "critical" or (epss or 0) >= 0.5
-          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7) or ms_disclosed):
+          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7) or ms_disclosed or tn_urgent):
         group = "soon"
     else:
         group = "aware"
@@ -232,6 +256,20 @@ def describe(v, releases, today):
         why += [["Publicly disclosed", True], [" before Microsoft's fix (a zero-day); not seen exploited yet.", False]]
     elif zw:
         why += [["Cloudflare says: ", False], [zw.get("headline") or "", True], [". Not confirmed as exploited yet.", False]]
+    elif p["source"] == "truenas" and tn:
+        if tn.get("level") == "none":
+            why += [["TrueNAS itself is not affected", True],
+                    [f"; {tn['impact']}" if tn.get("impact") else ".", False]]
+        elif tn.get("rating"):
+            why += [["TrueNAS rates the impact ", False], [tn["rating"], True], [".", False]]
+        else:
+            why += [["TrueNAS published a security notice.", False]]
+        if tn.get("level") in ("high", "critical") and not tn_urgent:
+            why += [[f" Published {short_date(tn.get('published'))}; check your TrueNAS has the update.", False]]
+        m = re.search(r"\b(critical|high|medium|low)\b", tn.get("upstream") or "", re.I)
+        up = m.group(1).lower() if m else None
+        if up and tn.get("level") not in (None, "none") and TN.LEVELS.index(up) > TN.LEVELS.index(tn["level"]):
+            why += [[f" Rated {up} elsewhere, lower on TrueNAS.", False]]
     elif v["usnPrimary"]:
         why += [["Ubuntu rates this ", False], [prio, True],
                 [f"; updates are out for {', '.join(ubuntu['fixed']) or 'supported releases'}.", False]]
@@ -244,6 +282,11 @@ def describe(v, releases, today):
         why += [[" Proof-of-concept code is on GitHub.", False]]
     if not done and not exploited and epss_trend == "rising":
         why += [[" Exploit chance is rising", True], [f" (from {epss_was * 100:.1f}% a month ago).", False]]
+    if not done and tn and p["source"] != "truenas":
+        why += [[" TrueNAS itself is not affected." if tn.get("level") == "none"
+                 else f" TrueNAS rates the impact {tn.get('rating') or 'unrated'}.", False]]
+    if not done and tn and tn.get("fixedIn"):
+        why += [[" TrueNAS fix: ", False], [tn["fixedIn"], True], [".", False]]
     if not done and ms_info:
         why += [[f" Microsoft fix out ({ms_info[0]['releaseLabel']} updates).", False]]
     if not done and not v["usnPrimary"]:
@@ -253,7 +296,7 @@ def describe(v, releases, today):
             why += [[" Ubuntu fix still pending.", False]]
 
     reported = [s for s, on in (("Cloudflare", bool(zw)), ("CISA", bool(kev_dates)), ("VulnCheck", bool(vc_dates)),
-                                ("Microsoft", bool(ms_info)),
+                                ("Microsoft", bool(ms_info)), ("TrueNAS", bool(tn)),
                                 ("Ubuntu", bool(ubuntu["fixed"] or ubuntu["pending"]))) if on]
     return {
         "id": v["id"], "group": group, "title": title, "desc": desc, "why": why,
@@ -268,9 +311,10 @@ def describe(v, releases, today):
         "kevIds": [k["id"] for k in v["kevs"]], "usnIds": [u["id"] for u in v["usns"]],
         "msIds": [m["id"] for m in v["ms"]], "exploitedBy": exploited_by,
         "vcIds": [x["id"] for x in v["vcs"]], "vcLeadDays": vc_lead,
+        "tnIds": [x["id"] for x in v["tns"]], "truenas": tn,
         "microsoft": ms_info[0] if ms_info else None,
         "latest": _max([i.get("updated") or i.get("published") for i in
-                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"]] if i]) or "",
+                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"]] if i]) or "",
         "triage": triage,
     }
 

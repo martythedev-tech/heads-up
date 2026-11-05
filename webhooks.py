@@ -10,6 +10,9 @@ Events:
   soon     a vulnerability is new in "Patch soon" (or moved up from "For awareness")
   updated  Cloudflare changed its guidance on an open Act now / Patch soon item
   status   someone set a status (Investigating, Not affected, Patched)
+  patch    Microsoft published a month's security updates
+  routing  a route hijack or leak involves a watched network
+  truenas  iXsystems published a new TrueNAS advisory or impact statement
 """
 import asyncio
 import hashlib
@@ -29,10 +32,11 @@ KINDS = {"rocketchat": "Rocket.Chat", "slack": "Slack", "teams": "Microsoft Team
          "discord": "Discord", "json": "Plain JSON"}
 EVENTS = {"act": "New in Act now", "soon": "New in Patch soon",
           "updated": "Cloudflare updated its guidance", "status": "Status changed",
-          "patch": "Patch Tuesday is out", "routing": "Routing incident on a watched network"}
+          "patch": "Patch Tuesday is out", "routing": "Routing incident on a watched network",
+          "truenas": "New TrueNAS security advisory"}
 DEFAULT_EVENTS = ["act", "updated"]
-COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55", "routing": "#6250d6"}
-ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹", "routing": "🛰️"}
+COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55", "routing": "#6250d6", "truenas": "#0095d5"}
+ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹", "routing": "🛰️", "truenas": "🗄️"}
 BATCH_LIMIT = 4   # more events than this for one webhook in one go -> one summary message
 
 SCHEMA = """

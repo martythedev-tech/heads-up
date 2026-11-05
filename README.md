@@ -30,12 +30,14 @@ Sources, each with its own colour on the page:
 - **Ubuntu**: Security Notices and per-release fix status (hourly), rated by Ubuntu's own priority (via [OSV](https://osv.dev))
 - **VulnCheck KEV** (optional, free Community token, every 6 h): exploited vulnerabilities beyond CISA's list, often days earlier, with citations. VulnCheck-only items go to For awareness unless there is a strong signal (VulnCheck's honeypots saw attacks, public exploit code, severity 9+, or Cloudflare/Microsoft flag it)
 - **Microsoft**: Patch Tuesday from the [Security Update Guide](https://msrc.microsoft.com/update-guide) (every 6 h): zero-days (exploited or publicly disclosed) join the list; every CVE Microsoft fixed is marked
+- **TrueNAS**: [security advisories and impact statements](https://security.truenas.com/) from iXsystems (RSS, every 6 h). Pages from the last year join the list with TrueNAS's own impact rating, fix version and what to do; pages about wider CVEs (kernel, Samba, PHP, ...) are merged into the matching entry, so a CVSS 9.8 bug that TrueNAS rates Medium says so. A new "New TrueNAS security advisory" webhook event announces each new page once
 - **Exploit code**: [Metasploit](https://github.com/rapid7/metasploit-framework) exploit modules and [Exploit-DB](https://www.exploit-db.com) entries (daily), and proof-of-concept repositories on GitHub via [PoC-in-GitHub](https://github.com/nomi-sec/PoC-in-GitHub)
 - Scores per CVE: severity from [NVD](https://nvd.nist.gov) (CVSS), and exploit chance from [FIRST EPSS](https://www.first.org/epss/) with its trend over the last month
 
 Not yet exploited items move to **Patch soon** when they are critical, rated
 critical by Ubuntu, likely to be exploited, publicly disclosed by Microsoft,
-or have a Metasploit module / Exploit-DB entry and High severity or more.
+or have a Metasploit module / Exploit-DB entry and High severity or more, or
+when TrueNAS rated its impact High or Critical in the last 45 days.
 
 ### Charts tab
 
@@ -66,7 +68,7 @@ logged under their name.
   Tested on Ubuntu 26.04; Ubuntu 24.04 and Debian 12 or newer work the same way.
 - Outbound HTTPS from the server to radar.cloudflare.com, api.cloudflare.com,
   cisa.gov, ubuntu.com, api.osv.dev, api.first.org, services.nvd.nist.gov,
-  api.msrc.microsoft.com, gitlab.com (Exploit-DB), raw.githubusercontent.com
+  api.msrc.microsoft.com, security.truenas.com, gitlab.com (Exploit-DB), raw.githubusercontent.com
   and (with a token) api.vulncheck.com / serve.vulncheck.com.
 - Two free ports: **9443** (the dashboard, HTTPS) and **9080** (redirects to
   HTTPS and serves the certificate to trust). Both can be changed.
@@ -292,7 +294,7 @@ one (the keyring entry is `service heads-up purpose admin`).
 
 A small aiohttp app (`app.py`; grouping in `vulns.py`, alerts in
 `webhooks.py`, accounts in `users.py`, charts and Radar in `charts.py`,
-exploit code in `exploits.py`, Microsoft in `msrc.py`, VulnCheck in
+exploit code in `exploits.py`, Microsoft in `msrc.py`, TrueNAS in `truenas.py`, VulnCheck in
 `vulncheck.py`, transaction helper in `dbutil.py`) with a static front end and SQLite
 state, run by a hardened systemd unit (`DynamicUser`, read-only system,
 secrets via `systemd-creds`). Run it locally without TLS:
