@@ -92,7 +92,7 @@ def product_text(it):
     elif src == "truenas":
         parts = [] if extra.get("level") == "none" else ["TrueNAS"]   # TrueNAS says it's not affected
     elif src == "ubuntu":
-        parts = [it.get("title"), *(extra.get("packages") or [])]
+        parts = ["Ubuntu", it.get("title"), *(extra.get("packages") or [])]
     elif src == "zerowire":
         parts = [it.get("title"), *tags]
     else:

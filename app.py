@@ -43,7 +43,7 @@ import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.14.0"
+VERSION = "0.14.1"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))

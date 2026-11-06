@@ -46,7 +46,8 @@ organisation uses, each with the words that identify it in the feeds (e.g.
 FortiGate = "FortiGate, FortiOS"). Words match whole words in product names
 only (CISA/VulnCheck vendor and product, Microsoft product, Fortinet products,
 TrueNAS, Ubuntu packages, Cloudflare title and topics), never descriptions; a
-live preview shows what an entry would match. Matching entries are marked
+live preview shows what an entry would match. "Ubuntu" matches every Ubuntu
+notice, whether or not the package is installed. Matching entries are marked
 WE RUN, sorted first and can be shown alone ("Only what we run"). If attackers
 are using it, it goes to **Act now** whatever its age or source; if it is
 serious (CVSS 7+, Ubuntu high/critical, a Cloudflare briefing, TrueNAS
