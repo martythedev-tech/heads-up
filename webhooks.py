@@ -125,7 +125,7 @@ def describe_event(event, v, extra):
         return f"{ICONS['status']} Status changed", body
     if event == "updated":
         latest = v.get("zwLatest") or {}
-        body = f"Their advice: {v.get('zwHeadline')}."
+        body = f"Their advice: {v['zwHeadline']}." if v.get("zwHeadline") else ""
         if latest.get("text"):
             body = f"What changed ({V.short_date(latest.get('date'))}): {latest['text']} " + body
         return f"{ICONS['updated']} Cloudflare updated its guidance", body

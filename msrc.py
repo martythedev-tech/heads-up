@@ -103,7 +103,7 @@ def zero_day_items(db):
             "published": r["released"], "updated": r["released"], "category": status,
             "headline": f"{r['severity']} · {r['impact']}",
             "summary": f"{r['impact']} in {r['tag']}. Microsoft rates it {r['severity']}. {said} "
-                       f"The fix is in the {release_label(r['release'])} security updates.",
+                       f"Microsoft fixed it in its {release_label(r['release'])} release.",
             "cves": [r["cve"]], "tags": [r["tag"]] if r["tag"] else [],
             "fingerprint": f"{r['release']}|{r['exploited']}|{r['disclosed']}" + ("|poc" if poc_only else ""),
             "extra": {"release": r["release"], "releaseLabel": release_label(r["release"]), "severity": r["severity"],
@@ -120,7 +120,7 @@ def cve_info(db, cve_ids):
         chunk = ids[i:i + 500]
         for r in db.execute(f"SELECT * FROM msrc WHERE cve IN ({','.join('?' * len(chunk))})", chunk):
             out[r["cve"]] = {"release": r["release"], "releaseLabel": release_label(r["release"]),
-                             "severity": r["severity"], "exploited": bool(r["exploited"]),
+                             "severity": r["severity"], "exploited": bool(r["exploited"]), "cvss": r["cvss"],
                              "disclosed": bool(r["disclosed"]), "likelihood": r["likelihood"], "product": r["tag"]}
     return out
 

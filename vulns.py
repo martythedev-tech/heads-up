@@ -39,6 +39,14 @@ def rel(r):
     return REL_NAME.get(r, r)
 
 
+def cf_says(zw, after):
+    """Cloudflare's advice as "why" segments, without a blank if it has none."""
+    headline = zw.get("headline")
+    if not headline:
+        return [["Cloudflare flagged this" + after, False]]
+    return [["Cloudflare says: ", False], [headline, True], [after, False]]
+
+
 def kev_short(it):
     """'Ivanti Connect Secure Missing Authentication ... Vulnerability' -> 'Missing Authentication ...'"""
     n = str(it.get("headline") or "")
@@ -312,14 +320,14 @@ def describe(v, releases, today):
                 product = v["vcs"][0]["title"] if v["vcs"] else "it"
                 why += [[f" Check whether you run {product}." + (" (An older CVE, only recently reported as exploited.)" if old_cve else ""), False]]
         if zw:
-            why += [[" Cloudflare says: ", False], [zw.get("headline") or "", True], [".", False]]
+            why += [[" ", False], *cf_says(zw, ".")]
         if not recent_kev and not cf_urgent and not fn_not_mine and not ours:
             product = v["kevs"][0]["title"] if v["kevs"] else "it"
             why += [[f" Reported over 2 weeks ago; check whether you run {product}.", False]]
     elif ms_disclosed:
         why += [["Publicly disclosed", True], [" before Microsoft's fix (a zero-day); not seen exploited yet.", False]]
     elif zw:
-        why += [["Cloudflare says: ", False], [zw.get("headline") or "", True], [". Not confirmed as exploited yet.", False]]
+        why += cf_says(zw, ". Not confirmed as exploited yet.")
     elif p["source"] == "fortinet" and fn:
         why += [["Fortinet advisory for your ", False], [", ".join(fn["yours"] or fn["products"]), True],
                 [f" (CVSS {fn['cvss']:.1f})." if fn.get("cvss") is not None else ".", False]]

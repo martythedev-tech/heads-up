@@ -41,7 +41,7 @@ import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.13.0"
+VERSION = "0.13.1"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -324,7 +324,7 @@ class Fetcher:
     async def zero_wire(self):
         root = ET.fromstring(await self.get(ZERO_WIRE_RSS))
         with batch(self.db):
-            ids = []
+            ids, parsed = [], 0
             for it in root.iter("item"):
                 link = it.findtext("link") or ""
                 slug = link.rstrip("/").rsplit("/", 1)[-1]
@@ -336,12 +336,13 @@ class Fetcher:
                 cves = sorted({c.text for c in cats if c.text and CVE_RE.fullmatch(c.text)}
                               | set(CVE_RE.findall(raw)))
                 body = sanitize(raw)
-                m = re.match(r"<p><strong>(.*?)</strong>.*?Last checked <time datetime=\"([^\"]+)\"", body)
+                m = re.match(r"<p><strong>(.*?)</strong>.*?Last (?:checked|reviewed) <time datetime=\"([^\"]+)\"", body)
                 headline, checked = (m.group(1), m.group(2)) if m else ("", "")
+                parsed += bool(m)
                 # Drop the status line from the body; the dashboard shows it itself.
                 body = re.sub(r"^<p><strong>.*?</p>", "", body, count=1)
                 chronology = re.findall(r"<li><time datetime=\"([^\"]+)\">.*?</time>:\s*(.*?)</li>",
-                                        body.split("<h2>What happened</h2>")[0])
+                                        re.split(r"<h2>(?:What happened|Details)</h2>", body, maxsplit=1)[0])
                 published = it.findtext("pubDate")
                 try:
                     published = parsedate_to_datetime(published).date().isoformat()
@@ -360,6 +361,8 @@ class Fetcher:
                 })
             retire_missing(self.db, "zerowire", ids)
             source_ok(self.db, "zerowire", len(ids))
+            if ids and not parsed:  # show it on the page instead of quietly losing the advice
+                source_err(self.db, "zerowire", "Cloudflare's feed format changed: briefings have no status line we can read")
 
     async def kev(self):
         data = await self.get(KEV_JSON, as_json=True)
@@ -509,7 +512,7 @@ class Fetcher:
 
     async def enrich(self):
         rows = self.db.execute("SELECT source, cves FROM items WHERE active=1").fetchall()
-        everything, detailed, briefed = set(), set(), set()
+        everything, detailed, briefed, scored = set(), set(), set(), set()
         for r in rows:
             cves = json.loads(r["cves"] or "[]")
             everything.update(cves)
@@ -517,6 +520,9 @@ class Fetcher:
                 detailed.update(cves)
             if r["source"] == "zerowire":
                 briefed.update(cves)
+            # Everything but Ubuntu notices, which carry thousands of CVEs and Ubuntu's own priority.
+            if r["source"] != "ubuntu":
+                scored.update(cves)
         everything = sorted(everything)
         marks_all = ",".join("?" * len(everything)) or "''"
         marks_detailed = ",".join("?" * len(detailed)) or "''"
@@ -566,14 +572,16 @@ class Fetcher:
                                 [(prio, now(), c) for c, prio in results if prio is not False])
         if todo:
             source_ok(self.db, "osv", len(todo))
-        # NVD + Ubuntu tracker: per CVE, only for briefings and KEV items. NVD
-        # allows 5 requests / 30 s without a key, so space them out.
+        # NVD: per CVE. It allows 5 requests / 30 s without a key, so space them
+        # out, a batch per round, CVEs never looked up first.
+        marks_scored = ",".join("?" * len(scored)) or "''"
         todo = [r["id"] for r in self.db.execute(
-            f"SELECT id FROM cve WHERE id IN ({marks_detailed})"
+            f"SELECT id FROM cve WHERE id IN ({marks_scored})"
             " AND (nvd_at IS NULL OR nvd_at < ?) ORDER BY nvd_at IS NOT NULL, id DESC LIMIT 40",
-            (*sorted(detailed), now() - 24 * 3600))]
+            (*sorted(scored), now() - 24 * 3600))]
         for c in todo:
             await self.nvd_one(c)
+        # Ubuntu tracker: only for briefings and KEV items.
         # The tracker hangs on some CVEs while answering others at once, so a CVE
         # that failed goes to the back of the queue and can't block the rest.
         # Briefings come first, then CVEs never looked up, then the stalest.
@@ -773,6 +781,12 @@ def item_row(r, cves, triage):
     }
 
 
+def use_vendor_score(cve, info, vendor):
+    """NVD's score wins; until it has one, the vendor's own."""
+    if cve["cvss"] is None and info.get("cvss") is not None:
+        cve["cvss"], cve["cvssFrom"] = info["cvss"], vendor
+
+
 def build_state(db, inventory=None):
     """inventory: the "what we run" entries to match (default: the saved list)."""
     kev = {r["cve"]: dict(r) for r in db.execute("SELECT cve, added, due, ransomware FROM kev")}
@@ -789,8 +803,10 @@ def build_state(db, inventory=None):
         }
     for cve_id, info in MS.cve_info(db, cves).items():
         cves[cve_id]["msrc"] = info
+        use_vendor_score(cves[cve_id], info, "Microsoft")
     for cve_id, info in FN.cve_info(db, cves).items():
         cves[cve_id]["fortinet"] = info
+        use_vendor_score(cves[cve_id], info, "Fortinet")
     for cve_id, info in TN.cve_info(db, cves).items():
         cves[cve_id]["truenas"] = info
     for cve_id, info in VC.cve_info(db, cves).items():

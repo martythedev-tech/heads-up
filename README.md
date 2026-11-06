@@ -18,7 +18,7 @@ Every vulnerability appears once, in one of four groups:
 
 | Group | Meaning |
 | --- | --- |
-| **Act now** | Attackers are using it (CISA), and Cloudflare flagged it or CISA added it in the last 14 days |
+| **Act now** | Attackers are using it (CISA, VulnCheck, Microsoft or Fortinet), and Cloudflare flagged it, it was reported in the last 14 days, or you run it |
 | **Patch soon** | Critical, but not confirmed as exploited yet |
 | **For awareness** | Exploited more than 2 weeks ago, Cloudflare reference briefings, high-priority Ubuntu updates |
 | **Done** | Marked Patched or Not affected |
@@ -33,7 +33,7 @@ Sources, each with its own colour on the page:
 - **TrueNAS**: [security advisories and impact statements](https://security.truenas.com/) from iXsystems (RSS, every 6 h). Pages from the last year join the list with TrueNAS's own impact rating, fix version and what to do; pages about wider CVEs (kernel, Samba, PHP, ...) are merged into the matching entry, so a CVSS 9.8 bug that TrueNAS rates Medium says so. A new "New TrueNAS security advisory" webhook event announces each new page once
 - **Fortinet**: [PSIRT advisories](https://www.fortiguard.com/psirt) (RSS + each advisory's CSAF file, every 6 h), filtered to the products in `HU_FORTINET_PRODUCTS` (default `FortiOS,FortiAnalyzer,FortiClient`; a name covers its variants such as FortiClientWindows and FortiClientEMS, not the Cloud/PaaS services). Entries show Fortinet's CVSS, fixed versions per release line, and workarounds or IPS virtual patches. An advisory Fortinet marks "exploited in the wild" counts as exploited (For awareness if it's for a product you don't run). Fortinet's statements on other software (e.g. Linux kernel) are attached to existing entries. A "New Fortinet advisories for your products" webhook event sends one message per batch
 - **Exploit code**: [Metasploit](https://github.com/rapid7/metasploit-framework) exploit modules and [Exploit-DB](https://www.exploit-db.com) entries (daily), and proof-of-concept repositories on GitHub via [PoC-in-GitHub](https://github.com/nomi-sec/PoC-in-GitHub)
-- Scores per CVE: severity from [NVD](https://nvd.nist.gov) (CVSS), and exploit chance from [FIRST EPSS](https://www.first.org/epss/) with its trend over the last month
+- Scores per CVE: severity from [NVD](https://nvd.nist.gov) (CVSS; looked up 40 per hour, so a long list takes a while to fill in, and not for CVEs known only from Ubuntu notices, which have Ubuntu's priority instead), using Microsoft's or Fortinet's own score until NVD has one; and exploit chance from [FIRST EPSS](https://www.first.org/epss/) with its trend over the last month
 
 **Search** covers everything stored, not only the main list: matches elsewhere
 appear under "Not on the main list" (Microsoft's last three releases, the full
@@ -195,7 +195,7 @@ Admins add everyone else; there is no self-registration.
 2. Enter a **username** (lowercase, e.g. `jsmith`), a **name** shown next to
    the statuses they set, and a **role**:
    - **Member**: reads, sets statuses, refreshes sources.
-   - **Admin**: also manages users and webhooks.
+   - **Admin**: also manages users, webhooks, What we run, optional source tokens and watched networks.
 3. Leave **Password** empty to generate a strong one. It's shown **once** with a
    **Copy** button; give it to them and they can change it after signing in.
 
@@ -216,6 +216,8 @@ choice of what to be told about:
 - **Status changed**: someone marked an item Investigating, Not affected or Patched
 - **Patch Tuesday is out**: one summary when Microsoft publishes a month's updates
 - **Routing incident on a watched network**: a route hijack or leak involves a network you watch
+- **New TrueNAS security advisory**: iXsystems published an advisory or impact statement
+- **New Fortinet advisories for your products**: one message per batch
 
 Nothing is sent for what already exists when Heads Up first starts. More than
 four alerts at once arrive as one summary. Webhook URLs are stored encrypted.
@@ -320,7 +322,7 @@ one (the keyring entry is `service heads-up purpose admin`).
 ## How it's built
 
 A small aiohttp app (`app.py`; grouping in `vulns.py`, alerts in
-`webhooks.py`, accounts in `users.py`, charts and Radar in `charts.py`,
+`webhooks.py`, accounts in `users.py`, search in `search.py`, charts and Radar in `charts.py`,
 exploit code in `exploits.py`, Microsoft in `msrc.py`, TrueNAS in `truenas.py`, Fortinet in `fortinet.py`, what we run in `inventory.py`, VulnCheck in
 `vulncheck.py`, transaction helper in `dbutil.py`) with a static front end and SQLite
 state, run by a hardened systemd unit (`DynamicUser`, read-only system,

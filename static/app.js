@@ -319,22 +319,25 @@ function render() {
 
 // --- drawer -----------------------------------------------------------------------
 
-function section(body, name) {
-  const m = (body || "").match(new RegExp(`<h2>${name}</h2>([\\s\\S]*?)(?=<h[23]>|$)`));
-  return m ? m[1] : "";
+function section(body, ...names) {
+  for (const name of names) {
+    const m = (body || "").match(new RegExp(`<h2>${name}</h2>([\\s\\S]*?)(?=<h2>|$)`));
+    if (m) return m[1];
+  }
+  return "";
 }
 
 function cfBox(v) {
   const it = v.zw;
   if (!it) return "";
-  const todo = section(it.body, "What to do now");
-  const who = section(it.body, "Who should investigate");
-  return `<div class="box src-cf"><h4><span class="badge cf">Cloudflare</span> says: ${esc(it.headline)}
-      <span class="muted small">checked ${esc(day(it.updated))}</span>
+  const todo = section(it.body, "Recommended action", "What to do now");
+  const who = section(it.body, "Affected deployments", "Who should investigate");
+  return `<div class="box src-cf"><h4><span class="badge cf">Cloudflare</span> ${it.headline ? `says: ${esc(it.headline)}` : "briefing"}
+      <span class="muted small">reviewed ${esc(day(it.updated))}</span>
       <a class="small" href="${esc(it.link)}" target="_blank" rel="noopener">Read on Cloudflare ↗</a></h4>
     <div class="prose">
       ${todo ? `<div class="label">What to do now</div>${todo}` : `<p>${esc(it.summary)}</p>`}
-      ${who ? `<div class="label">Who should check</div>${who}` : ""}
+      ${who ? `<div class="label">Who is affected</div>${who}` : ""}
       <details class="full"><summary>Full briefing (what happened, timeline, sources)</summary>${it.body}</details>
     </div></div>`;
 }
@@ -405,13 +408,13 @@ function vcBox(v) {
 function msBox(v) {
   const rows = v.cveList.filter((c) => c.msrc);
   if (!rows.length) return "";
-  return `<div class="box src-ms"><h4><span class="badge ms">Microsoft</span> fixed in ${esc(rows[0].msrc.releaseLabel)} security updates</h4>
+  return `<div class="box src-ms"><h4><span class="badge ms">Microsoft</span> fixed in its ${esc(rows[0].msrc.releaseLabel)} release</h4>
     ${rows.slice(0, 12).map((c) => `<div class="kv">
       <span class="k">Vulnerability</span><span><a class="mono" href="https://msrc.microsoft.com/update-guide/vulnerability/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a> · ${esc(c.msrc.product || "")}</span>
       <span class="k">Microsoft's rating</span><span>${esc(c.msrc.severity || "")}</span>
       <span class="k">Status at release</span><span>${c.msrc.exploited ? `<b class="v crit">Already exploited</b>` : c.msrc.disclosed ? `<b class="v high">Publicly disclosed</b>` : "Not exploited, not disclosed"}</span>
       <span class="k">Microsoft expects</span><span>${esc(c.msrc.likelihood || "–")}</span></div>`).join(`<hr class="sep">`)}
-    <p class="small muted">Install the ${esc(rows[0].msrc.releaseLabel)} updates (Windows Update, WSUS or Intune) on affected systems.</p></div>`;
+    <p class="small muted">Fixed in Microsoft's ${esc(rows[0].msrc.releaseLabel)} release. Most fixes arrive through Windows Update, WSUS or Intune, but Store apps update through the Microsoft Store, so check the advisory for how this one is delivered.</p></div>`;
 }
 
 function fnBox(v) {
@@ -466,7 +469,7 @@ function exploitBox(v) {
     return `<div class="box src-ex"><h4><span class="badge ex">Exploit code</span> none known</h4>
       <p class="muted small">${checked ? "No Metasploit module, Exploit-DB entry or GitHub proof-of-concept found." : "No Metasploit module or Exploit-DB entry found. GitHub is checked within the hour."}</p></div>`;
   }
-  return `<div class="box src-ex"><h4><span class="badge ex">Exploit code</span> is public</h4>
+  return `<div class="box src-ex"><h4><span class="badge ex">Exploit code</span> ${msf.length || edb.length ? "is public" : "unverified, on GitHub"}</h4>
     ${msf.length ? `<div class="label">Metasploit: ready-made attack module</div><ul class="small">${msf.map((m) =>
       `<li><a href="https://www.rapid7.com/db/modules/${esc(m.name)}/" target="_blank" rel="noopener"><span class="mono">${esc(m.name)}</span></a> · ${esc(m.title)}${m.rank ? ` · rank ${esc(m.rank)}` : ""} <span class="muted">(${esc(m.cve)})</span></li>`).join("")}</ul>` : ""}
     ${edb.length ? `<div class="label">Exploit-DB: published exploit code</div><ul class="small">${edb.map((m) =>
@@ -486,12 +489,12 @@ function scoresBox(v) {
     const sev = severity(c.cvss);
     const ex = exploitChance(c.epss);
     return `<tr><td><a class="mono" href="https://nvd.nist.gov/vuln/detail/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a></td>
-      <td>${sev ? `<span class="v ${sev.cls}">${sev.label} · ${c.cvss.toFixed(1)}</span>` : `<span class="muted">not scored yet</span>`}</td>
+      <td>${sev ? `<span class="v ${sev.cls}">${sev.label} · ${c.cvss.toFixed(1)}</span>${c.cvssFrom ? ` <span class="muted small">(${esc(c.cvssFrom)})</span>` : ""}` : `<span class="muted">not scored yet</span>`}</td>
       <td>${ex ? `<span class="v ${ex.cls}">${ex.label}</span> <span class="muted">(${ex.pct}%)</span>${c.epssSeries && c.epssSeries.length > 1 ? `<div class="spark-row">${sparkline(c.epssSeries)}<span class="muted small">${(c.epssSeries[0].e * 100).toFixed(1)}% on ${esc(day(c.epssSeries[0].d))}</span></div>` : ""}` : `<span class="muted">unknown</span>`}</td>
       <td>${c.kev ? `<span class="v crit">Yes</span> <span class="muted">since ${esc(day(c.kev.added))}</span>` : `<span class="muted">not confirmed</span>`}</td></tr>`;
   }).join("");
   return `<div class="box"><h4>Scores per CVE${v.cveList.length > list.length ? ` <span class="muted small">(${list.length} most likely to be exploited, of ${v.cveList.length})</span>` : ""}</h4>
-    <table class="cves"><thead><tr><th>CVE</th><th>Severity<small>0–10, from NVD</small></th><th>Exploit chance<small>next 30 days, trend over the last month, from FIRST</small></th><th>Exploited<small>from CISA</small></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    <table class="cves"><thead><tr><th>CVE</th><th>Severity<small>0–10, from NVD, or the vendor where named</small></th><th>Exploit chance<small>next 30 days, trend over the last month, from FIRST</small></th><th>Exploited<small>from CISA</small></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function triageBox(v) {
