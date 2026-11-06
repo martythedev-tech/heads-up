@@ -240,7 +240,8 @@ def describe(v, releases, today):
         title = f"{p['title']}: {kev_short(p)}"
         desc = str(p.get("summary") or "")
     elif p["source"] == "msrc":
-        title = f"{(p.get('tags') or ['Microsoft'])[0]}: {p['title']}"
+        product = (p.get("tags") or ["Microsoft"])[0]
+        title = p["title"] if product.lower() in p["title"].lower() else f"{product}: {p['title']}"
         desc = p["summary"]
     elif p["source"] == "truenas":
         title = p["title"] if "truenas" in p["title"].lower() else f"TrueNAS: {p['title']}"
@@ -289,7 +290,8 @@ def describe(v, releases, today):
     elif exploited:
         group = "aware"
     elif (cf_urgent or (cvss or 0) >= 9 or prio == "critical" or (epss or 0) >= 0.5
-          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7) or ms_disclosed or tn_urgent or fn_urgent):
+          or (exploit in ("metasploit", "exploitdb") and (cvss or 0) >= 7) or ms_disclosed or tn_urgent or fn_urgent
+          or (exploit == "poc" and bool(v["ms"]))):
         group = "soon"
     else:
         group = "aware"
@@ -343,6 +345,8 @@ def describe(v, releases, today):
     if not done and exploit in ("metasploit", "exploitdb"):
         why += [[" Exploit code is public", True],
                 [" (Metasploit module)." if exploit == "metasploit" else " (Exploit-DB).", False]]
+    elif not done and exploit == "poc" and not exploited and v["ms"]:
+        why += [[" Unverified public exploit code", True], [" is on GitHub. Don't run it: some of these are fakes or malware.", False]]
     elif not done and exploit == "poc" and not exploited:
         why += [[" Proof-of-concept code is on GitHub.", False]]
     if not done and not exploited and epss_trend == "rising":

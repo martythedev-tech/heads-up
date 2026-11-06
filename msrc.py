@@ -86,20 +86,26 @@ async def refresh(db, session):
 
 
 def zero_day_items(db):
-    """Exploited or publicly disclosed Microsoft fixes, as dashboard items."""
+    """Microsoft fixes that join the main list: exploited, publicly disclosed, or
+    Critical/Important with proof-of-concept code on GitHub."""
     items = []
-    for r in db.execute("SELECT * FROM msrc WHERE exploited=1 OR disclosed=1"):
-        status = "Exploited" if r["exploited"] else "Publicly disclosed"
+    for r in db.execute("SELECT m.*, c.poc AS poc FROM msrc m LEFT JOIN cve c ON c.id = m.cve "
+                        "WHERE m.exploited=1 OR m.disclosed=1 OR (m.severity IN ('Critical', 'Important') "
+                        "AND c.poc IS NOT NULL AND c.poc != '[]')"):
+        poc_only = not r["exploited"] and not r["disclosed"]
+        status = "Exploited" if r["exploited"] else "Publicly disclosed" if r["disclosed"] else "Public exploit code"
+        said = ("It is not reported as exploited, but unverified exploit code has appeared on GitHub." if poc_only
+                else "Microsoft says it is already being exploited." if r["exploited"]
+                else "Microsoft says it is publicly disclosed (details were out before the fix).")
         items.append({
             "id": f"ms:{r['cve']}", "source": "msrc", "title": r["title"],
             "link": f"https://msrc.microsoft.com/update-guide/vulnerability/{r['cve']}",
             "published": r["released"], "updated": r["released"], "category": status,
             "headline": f"{r['severity']} · {r['impact']}",
-            "summary": f"{r['impact']} in {r['tag']}. Microsoft rates it {r['severity']} and says it is "
-                       f"{'already being exploited' if r['exploited'] else 'publicly disclosed (details were out before the fix)'}. "
+            "summary": f"{r['impact']} in {r['tag']}. Microsoft rates it {r['severity']}. {said} "
                        f"The fix is in the {release_label(r['release'])} security updates.",
             "cves": [r["cve"]], "tags": [r["tag"]] if r["tag"] else [],
-            "fingerprint": f"{r['release']}|{r['exploited']}|{r['disclosed']}",
+            "fingerprint": f"{r['release']}|{r['exploited']}|{r['disclosed']}" + ("|poc" if poc_only else ""),
             "extra": {"release": r["release"], "releaseLabel": release_label(r["release"]), "severity": r["severity"],
                       "impact": r["impact"], "product": r["tag"], "likelihood": r["likelihood"],
                       "exploited": bool(r["exploited"]), "disclosed": bool(r["disclosed"])},

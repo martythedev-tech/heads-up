@@ -29,11 +29,17 @@ Sources, each with its own colour on the page:
 - **CISA**: the [Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) catalog (every 3 h)
 - **Ubuntu**: Security Notices and per-release fix status (hourly), rated by Ubuntu's own priority (via [OSV](https://osv.dev))
 - **VulnCheck KEV** (optional, free Community token, every 6 h): exploited vulnerabilities beyond CISA's list, often days earlier, with citations. VulnCheck-only items go to For awareness unless there is a strong signal (VulnCheck's honeypots saw attacks, public exploit code, severity 9+, or Cloudflare/Microsoft flag it)
-- **Microsoft**: Patch Tuesday from the [Security Update Guide](https://msrc.microsoft.com/update-guide) (every 6 h): zero-days (exploited or publicly disclosed) join the list; every CVE Microsoft fixed is marked
+- **Microsoft**: Patch Tuesday from the [Security Update Guide](https://msrc.microsoft.com/update-guide) (every 6 h): zero-days (exploited or publicly disclosed) and Critical or Important CVEs with proof-of-concept code on GitHub join the list; every CVE Microsoft fixed is marked
 - **TrueNAS**: [security advisories and impact statements](https://security.truenas.com/) from iXsystems (RSS, every 6 h). Pages from the last year join the list with TrueNAS's own impact rating, fix version and what to do; pages about wider CVEs (kernel, Samba, PHP, ...) are merged into the matching entry, so a CVSS 9.8 bug that TrueNAS rates Medium says so. A new "New TrueNAS security advisory" webhook event announces each new page once
 - **Fortinet**: [PSIRT advisories](https://www.fortiguard.com/psirt) (RSS + each advisory's CSAF file, every 6 h), filtered to the products in `HU_FORTINET_PRODUCTS` (default `FortiOS,FortiAnalyzer,FortiClient`; a name covers its variants such as FortiClientWindows and FortiClientEMS, not the Cloud/PaaS services). Entries show Fortinet's CVSS, fixed versions per release line, and workarounds or IPS virtual patches. An advisory Fortinet marks "exploited in the wild" counts as exploited (For awareness if it's for a product you don't run). Fortinet's statements on other software (e.g. Linux kernel) are attached to existing entries. A "New Fortinet advisories for your products" webhook event sends one message per batch
 - **Exploit code**: [Metasploit](https://github.com/rapid7/metasploit-framework) exploit modules and [Exploit-DB](https://www.exploit-db.com) entries (daily), and proof-of-concept repositories on GitHub via [PoC-in-GitHub](https://github.com/nomi-sec/PoC-in-GitHub)
 - Scores per CVE: severity from [NVD](https://nvd.nist.gov) (CVSS), and exploit chance from [FIRST EPSS](https://www.first.org/epss/) with its trend over the last month
+
+**Search** covers everything stored, not only the main list: matches elsewhere
+appear under "Not on the main list" (Microsoft's last three releases, the full
+CISA and VulnCheck lists, Fortinet, Exploit-DB and Metasploit), and a full CVE
+number Heads Up has never seen is looked up live in NVD. A search ignores "Only
+what we run". The main list itself doesn't change.
 
 **What we run** (signed-in users; admins edit): the products your
 organisation uses, each with the words that identify it in the feeds (e.g.
@@ -52,6 +58,7 @@ entries it moves.
 
 Not yet exploited items move to **Patch soon** when they are critical, rated
 critical by Ubuntu, likely to be exploited, publicly disclosed by Microsoft,
+a Critical or Important Microsoft fix with unverified exploit code on GitHub,
 or have a Metasploit module / Exploit-DB entry and High severity or more, or
 when TrueNAS rated its impact High or Critical in the last 45 days, or Fortinet
 scored an advisory for your Fortinet products 9 or more in the last 45 days.
@@ -85,7 +92,7 @@ logged under their name.
   Tested on Ubuntu 26.04; Ubuntu 24.04 and Debian 12 or newer work the same way.
 - Outbound HTTPS from the server to radar.cloudflare.com, api.cloudflare.com,
   cisa.gov, ubuntu.com, api.osv.dev, api.first.org, services.nvd.nist.gov,
-  api.msrc.microsoft.com, security.truenas.com, filestore.fortinet.com, gitlab.com (Exploit-DB), raw.githubusercontent.com
+  api.msrc.microsoft.com, security.truenas.com, filestore.fortinet.com, gitlab.com (Exploit-DB), raw.githubusercontent.com, api.github.com
   and (with a token) api.vulncheck.com / serve.vulncheck.com.
 - Two free ports: **9443** (the dashboard, HTTPS) and **9080** (redirects to
   HTTPS and serves the certificate to trust). Both can be changed.

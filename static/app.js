@@ -104,11 +104,83 @@ function buildVulns() {
 }
 
 function matches(v) {
-  if (oursOnly && data.inventoryCount && !(v.ours || []).length) return false;
-  if (!query) return true;
-  const hay = [v.title, v.desc, v.id, ...v.items.flatMap((i) => [i.title, i.headline, i.tags.join(" "), i.extra?.packages?.join(" ")]),
-    ...v.cveList.slice(0, 50).map((c) => c.id)].join(" ").toLowerCase();
+  // A search looks everywhere: "Only what we run" applies to browsing, not to it.
+  if (!query) return !(oursOnly && data.inventoryCount && !(v.ours || []).length);
+  const hay = [v.title, v.desc, v.id, v.ms.length ? "microsoft ms" : "",
+    ...v.items.flatMap((i) => [i.title, i.headline, i.tags.join(" "), i.extra?.packages?.join(" ")]),
+    ...v.cveList.map((c) => c.id)].join(" ").toLowerCase();
   return query.split(/\s+/).every((w) => hay.includes(w));
+}
+
+// --- search beyond the main list -----------------------------------------------
+
+let more = null;     // the server's answer for the current search
+let moreTimer = null;
+let moreSeq = 0;     // only the newest request may show its answer
+
+function searchStored() {
+  clearTimeout(moreTimer);
+  const seq = ++moreSeq;
+  more = query.length >= 2 ? { pending: true } : null;
+  if (!more) return;
+  moreTimer = setTimeout(async () => {
+    let answer;
+    try {
+      const r = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      answer = r.ok ? await r.json() : { failed: true };
+    } catch {
+      answer = { failed: true };
+    }
+    if (seq !== moreSeq) return;
+    more = answer;
+    render();
+  }, 300);
+}
+
+function severityClass(severity) {
+  const s = String(severity || "").toLowerCase();
+  return s === "critical" ? "crit" : s === "high" || s === "important" ? "high" : s === "medium" || s === "moderate" ? "med" : "none";
+}
+
+function moreRow(e) {
+  const source = { ms: ["ms", "Microsoft"], cisa: ["cisa", "CISA"], vc: ["vc", "VulnCheck KEV"], fn: ["fn", "Fortinet"] };
+  const code = e.exploitCode || {};
+  const badges = e.sources.map((s) => `<span class="badge ${source[s][0]}">${source[s][1]}</span>`);
+  if (code.msf) badges.push(`<span class="badge ex">Metasploit</span>`);
+  if (code.edb) badges.push(`<span class="badge ex">Exploit-DB</span>`);
+  if (code.poc) badges.push(`<span class="badge ex">GitHub <span class="detail">unverified exploit code</span></span>`);
+  const exploit = code.msf || code.edb ? "Public exploit code." : code.poc ? "Unverified public exploit code on GitHub." : "";
+  return `<a class="srow" href="${esc(e.link)}" target="_blank" rel="noopener noreferrer">
+    <div>
+      <div class="v-title">${esc(e.title)}</div>
+      <div class="v-desc">${esc(e.id)}${e.product ? ` · ${esc(e.product)}` : ""}</div>
+      <div class="v-why">${e.exploited ? "<b>Reported as exploited.</b> " : ""}${exploit ? `<b>${exploit}</b> ` : ""}${esc(e.notes.join(" "))}</div>
+    </div>
+    <div class="facts">
+      <div class="fact"><span class="k">Severity</span><span class="v ${severityClass(e.severity)}">${esc(e.severity || "Not rated")}</span></div>
+      <div class="fact"><span class="k">CVSS</span><span class="v">${e.cvss == null ? "Not scored" : esc(e.cvss)}</span></div>
+    </div>
+    <div class="sources-col">${badges.join("")}</div>
+  </a>`;
+}
+
+function nvdRow(n) {
+  if (n.error) return `<div class="empty">${esc(n.id)}: ${esc(n.error)}.</div>`;
+  if (!n.found) return `<div class="empty">Heads Up and NVD have no record of ${esc(n.id)}. Check the number.</div>`;
+  return moreRow({ id: n.id, title: n.id, link: `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(n.id)}`, severity: n.severity, cvss: n.cvss,
+    sources: [], notes: [`Not in any Heads Up feed; looked up live from NVD (published ${n.published}). ${n.description}`] });
+}
+
+function moreSection() {
+  if (!query || !more) return "";
+  const head = (detail) => `<div class="g-head"><h2>Not on the main list</h2>${detail}<span class="explain">Everything else Heads Up has stored. These links open the source.</span></div>`;
+  if (more.pending) return `<section class="group g-more">${head("")}<div class="table"><div class="empty">Searching…</div></div></section>`;
+  if (more.failed) return `<section class="group g-more">${head("")}<div class="table"><div class="empty">The search didn't work. Try again.</div></div></section>`;
+  const count = more.total > more.results.length ? `<span class="count">Newest ${more.results.length} of ${more.total}</span>` : `<span class="count">${more.total}</span>`;
+  let body = more.results.map(moreRow).join("");
+  if (more.nvd) body = nvdRow(more.nvd);
+  if (!body) body = `<div class="empty">${more.onMain ? "It's on the main list, nothing else stored matches." : "Nothing else stored matches."}</div>`;
+  return `<section class="group g-more">${head(count)}<div class="table">${body}</div></section>`;
 }
 
 // --- pieces ---------------------------------------------------------------------
@@ -195,7 +267,7 @@ function renderFilter() {
 function renderGroups(byGroup) {
   $("#groups").innerHTML = Object.entries(GROUPS).map(([k, g]) => {
     const list = byGroup[k];
-    const collapsed = k === "done" && !showDone;
+    const collapsed = k === "done" && !showDone && !query;
     const rows = collapsed ? "" : list.slice(0, shown[k]).map((v) => `
       <button class="vrow" data-id="${esc(v.id)}">
         <div>
@@ -216,6 +288,9 @@ function renderGroups(byGroup) {
       <div class="g-head"><h2>${g.title}</h2><span class="count">${list.length}</span><span class="explain">${g.explain}</span>${toggle}</div>
       ${body}</section>`;
   }).join("");
+  // Nothing on the main list: put what was found where it can be seen.
+  const none = !Object.values(byGroup).some((list) => list.length);
+  $("#groups").insertAdjacentHTML(none ? "afterbegin" : "beforeend", moreSection());
 }
 
 function render() {
@@ -1120,7 +1195,7 @@ document.addEventListener("click", (e) => {
   if (open && !e.target.closest("a")) return openDrawer(open.dataset.id);
 });
 $("#scrim").onclick = closeDrawer;
-$("#q").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); render(); });
+$("#q").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); searchStored(); render(); });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && (openId || hooksOpen || accountOpen || invOpen) && !$("#login").open) closeDrawer();
   if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) { e.preventDefault(); $("#q").focus(); }

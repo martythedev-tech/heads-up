@@ -32,6 +32,7 @@ import charts as C
 from dbutil import batch
 import exploits as X
 import msrc as MS
+import search as SR
 import truenas as TN
 import fortinet as FN
 import inventory as INV
@@ -40,7 +41,7 @@ import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.12.0"
+VERSION = "0.13.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -144,10 +145,12 @@ def source_ok(db, name, count):
 
 
 def source_err(db, name, error):
-    log(f"[{name}] {error}")
+    # Some exceptions (a timeout, for one) have no message of their own.
+    text = str(error) or type(error).__name__
+    log(f"[{name}] {text}")
     db.execute("INSERT INTO sources(name, err_at, error) VALUES(?,?,?) "
                "ON CONFLICT(name) DO UPDATE SET err_at=excluded.err_at, error=excluded.error",
-               (name, now(), str(error)[:300]))
+               (name, now(), text[:300]))
 
 
 def upsert_item(db, item):
@@ -238,11 +241,24 @@ def kev_title(vendor, product):
     return f"{vendor} {product}".strip()
 
 
+def nvd_score(cve):
+    """(score, severity, vector) from one NVD record, newest CVSS version first."""
+    metrics = cve.get("metrics") or {}
+    for key in ("cvssMetricV31", "cvssMetricV40", "cvssMetricV30", "cvssMetricV2"):
+        entries = sorted(metrics.get(key) or [], key=lambda m: m.get("type") != "Primary")
+        if entries:
+            d = entries[0]["cvssData"]
+            return d.get("baseScore"), d.get("baseSeverity") or entries[0].get("baseSeverity"), d.get("vectorString")
+    return None, None, None
+
+
 class Fetcher:
     def __init__(self, db):
         self.db = db
         self.session = None
         self.nvd_last = 0.0
+        self.ubuntu_failed = {}  # CVE -> when its tracker lookup last failed
+        self.nvd_cache = {}      # CVE -> (when, answer), for searches
         self.lock = asyncio.Lock()
         self.last_run = {}
         self.after_refresh = None
@@ -435,15 +451,18 @@ class Fetcher:
             retire_missing(self.db, "vulncheck", ids)
             source_ok(self.db, "vulncheck", n)
 
-    async def msrc(self):
-        n = await MS.refresh(self.db, self.session)
+    def sync_ms_items(self):
         with batch(self.db):
             ids = []
             for item in MS.zero_day_items(self.db):
                 ids.append(item["id"])
                 upsert_item(self.db, item)
             retire_missing(self.db, "msrc", ids)
-            source_ok(self.db, "msrc", n)
+
+    async def msrc(self):
+        n = await MS.refresh(self.db, self.session)
+        self.sync_ms_items()
+        source_ok(self.db, "msrc", n)
         if self.on_patch_tuesday:
             await self.on_patch_tuesday()
 
@@ -490,12 +509,14 @@ class Fetcher:
 
     async def enrich(self):
         rows = self.db.execute("SELECT source, cves FROM items WHERE active=1").fetchall()
-        everything, detailed = set(), set()
+        everything, detailed, briefed = set(), set(), set()
         for r in rows:
             cves = json.loads(r["cves"] or "[]")
             everything.update(cves)
             if r["source"] in ("zerowire", "kev"):
                 detailed.update(cves)
+            if r["source"] == "zerowire":
+                briefed.update(cves)
         everything = sorted(everything)
         marks_all = ",".join("?" * len(everything)) or "''"
         marks_detailed = ",".join("?" * len(detailed)) or "''"
@@ -523,6 +544,11 @@ class Fetcher:
             source_err(self.db, "epss-history", e)
         n = await X.refresh_poc(self.db, self.session, sorted(detailed), log)
         source_ok(self.db, "poc", n)
+        try:
+            await X.refresh_ms_poc(self.db, self.session, log)
+            self.sync_ms_items()
+        except Exception as e:
+            source_err(self.db, "poc", e)
         # Ubuntu's priority for every CVE in a notice, via OSV (reliable, fast).
         marks = ",".join("?" * len(everything)) or "''"
         todo = [r["id"] for r in self.db.execute(
@@ -548,14 +574,25 @@ class Fetcher:
             (*sorted(detailed), now() - 24 * 3600))]
         for c in todo:
             await self.nvd_one(c)
-        todo = [r["id"] for r in self.db.execute(
-            f"SELECT id FROM cve WHERE id IN ({marks_detailed})"
-            " AND (ubuntu_at IS NULL OR ubuntu_at < ?) LIMIT 60",
-            (*sorted(detailed), now() - 6 * 3600))]
+        # The tracker hangs on some CVEs while answering others at once, so a CVE
+        # that failed goes to the back of the queue and can't block the rest.
+        # Briefings come first, then CVEs never looked up, then the stalest.
+        stale = self.db.execute(
+            f"SELECT id, ubuntu_at FROM cve WHERE id IN ({marks_detailed})"
+            " AND (ubuntu_at IS NULL OR ubuntu_at < ?)",
+            (*sorted(detailed), now() - 6 * 3600)).fetchall()
+        stale.sort(key=lambda r: (self.ubuntu_failed.get(r["id"], 0), r["id"] not in briefed,
+                                  r["ubuntu_at"] is not None, r["ubuntu_at"] or 0))
         failures = 0
-        for c in todo:
-            failures = 0 if await self.ubuntu_one(c) else failures + 1
-            if failures >= 3:
+        for r in stale[:60]:
+            c = r["id"]
+            if await self.ubuntu_one(c):
+                self.ubuntu_failed.pop(c, None)
+                failures = 0
+            else:
+                self.ubuntu_failed[c] = now()
+                failures += 1
+            if failures >= 10:  # that many in a row: the tracker itself is down
                 log("[ubuntu-cve] tracker is failing; trying again next round")
                 break
             await asyncio.sleep(1)
@@ -572,17 +609,38 @@ class Fetcher:
             return
         score = severity = vector = None
         for v in data.get("vulnerabilities") or []:
-            metrics = v["cve"].get("metrics") or {}
-            for key in ("cvssMetricV31", "cvssMetricV40", "cvssMetricV30", "cvssMetricV2"):
-                entries = sorted(metrics.get(key) or [], key=lambda m: m.get("type") != "Primary")
-                if entries:
-                    d = entries[0]["cvssData"]
-                    score, vector = d.get("baseScore"), d.get("vectorString")
-                    severity = d.get("baseSeverity") or entries[0].get("baseSeverity")
-                    break
+            score, severity, vector = nvd_score(v["cve"])
         self.db.execute("UPDATE cve SET cvss=?, severity=?, vector=?, nvd_at=? WHERE id=?",
                         (score, severity, vector, now(), cve_id))
         source_ok(self.db, "nvd", 1)
+
+    async def nvd_lookup(self, cve_id):
+        """A CVE someone searched for that Heads Up has never seen. Shares NVD's
+        rate limit with nvd_one; an answer is remembered for an hour."""
+        cached = self.nvd_cache.get(cve_id)
+        if cached and now() - cached[0] < 3600:
+            return cached[1]
+        if not self.session:
+            return {"error": "Heads Up is still starting"}
+        slot = max(now(), self.nvd_last + 7)
+        if slot - now() > 20:
+            return {"error": "NVD is busy, try again in a moment"}
+        self.nvd_last = slot
+        await asyncio.sleep(max(0, slot - now()))
+        try:
+            data = await asyncio.wait_for(self.get(NVD, params={"cveId": cve_id}, as_json=True), 20)
+        except Exception as e:
+            return {"error": f"NVD could not be reached ({str(e) or type(e).__name__})"}
+        answer = {"found": False}
+        for v in data.get("vulnerabilities") or []:
+            c = v["cve"]
+            score, severity, _ = nvd_score(c)
+            answer = {"found": True, "cvss": score, "severity": severity, "published": (c.get("published") or "")[:10],
+                      "description": next((d["value"] for d in c.get("descriptions") or [] if d.get("lang") == "en"), "")[:400]}
+        if len(self.nvd_cache) >= 500:
+            self.nvd_cache.clear()
+        self.nvd_cache[cve_id] = (now(), answer)
+        return answer
 
     async def osv_priority(self, cve_id):
         try:
@@ -611,7 +669,7 @@ class Fetcher:
                     raise RuntimeError(f"HTTP {r.status} for {cve_id}")
                 d = await r.json(content_type=None)
         except Exception as e:
-            source_err(self.db, "ubuntu-cve", e)
+            source_err(self.db, "ubuntu-cve", f"{cve_id}: {str(e) or type(e).__name__}")
             return False
         status = []
         for p in d.get("packages") or []:
@@ -760,6 +818,17 @@ async def api_state(request):
         "webhooksAvailable": request.app["hooks"].box is not None,
         **state,
     })
+
+
+async def api_search(request):
+    q = request.query.get("q", "").strip()[:120]
+    if len(q) < 2:
+        return web.json_response({"results": [], "total": 0, "onMain": False})
+    found = SR.search(request.app["db"], q)
+    # A full CVE number Heads Up knows nothing about: ask NVD.
+    if SR.CVE_ID.fullmatch(q) and not found["results"] and not found["onMain"]:
+        found["nvd"] = {"id": q.upper(), **await request.app["fetcher"].nvd_lookup(q.upper())}
+    return compressed(request, found)
 
 
 def compressed(request, payload):
@@ -1320,6 +1389,7 @@ def make_app(db, fetcher):
     app.router.add_post("/api/webhooks/test", api_webhook_test)
     app.router.add_get("/", index)
     app.router.add_get("/api/state", api_state)
+    app.router.add_get("/api/search", api_search)
     app.router.add_get("/api/history/{id}", api_history)
     app.router.add_post("/api/login", api_login)
     app.router.add_post("/api/logout", api_logout)
