@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented briefings in the format Cloudflare's Zero Wire feed used in November 2026. -->
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Example feed</title>
+    <item>
+      <title>Example TCP use-after-free</title>
+      <link>https://example.invalid/zero-wire/example-tcp-flaw</link>
+      <guid>example-tcp-flaw@2026-11-01</guid>
+      <pubDate>Sun, 01 Nov 2026 00:00:00 GMT</pubDate>
+      <dc:creator>Example</dc:creator>
+      <category>Needs attention</category>
+      <category domain="cve">CVE-2026-40001</category>
+      <category domain="topic">Kernel</category>
+      <description>Prioritize patching. A vendor published fixed kernels. Install them.</description>
+      <content:encoded><![CDATA[<p><strong>Prioritize patching</strong> · Last reviewed <time datetime="2026-11-02">Nov 2, 2026</time></p><p>A race can expose kernel memory.</p><h2>Updates</h2><ul><li><time datetime="2026-11-01">Nov 1, 2026</time>: A vendor published fixed kernels.</li><li><time datetime="2026-10-30">Oct 30, 2026</time>: The flaw was disclosed.</li></ul><h2>Details</h2><p>See <time datetime="2026-10-01">Oct 1, 2026</time> for more.</p><ul><li><time datetime="2026-10-01">Oct 1, 2026</time>: Not an update, only detail.</li></ul><h2>Risk</h2><p>High.</p><h2>Affected deployments</h2><p>Linux hosts.</p><h2>Recommended action</h2><p>Install the fixed kernel.</p><h2>Evidence and sources</h2><p>None here.</p>]]></content:encoded>
+    </item>
+    <item>
+      <title>Example web framework flaw</title>
+      <link>https://example.invalid/zero-wire/example-web-flaw</link>
+      <guid>example-web-flaw@2026-10-20</guid>
+      <pubDate>Tue, 20 Oct 2026 00:00:00 GMT</pubDate>
+      <category>Reference</category>
+      <category domain="cve">CVE-2026-40002</category>
+      <description>Assess your exposure. Check your framework version.</description>
+      <content:encoded><![CDATA[<p><strong>Assess your exposure</strong> · Last reviewed <time datetime="2026-10-21">Oct 21, 2026</time></p><p>A web flaw.</p><h2>Updates</h2><ul><li><time datetime="2026-10-20">Oct 20, 2026</time>: Published.</li></ul><h2>Details</h2><p>More.</p><h2>Recommended action</h2><p>Update it.</p>]]></content:encoded>
+    </item>
+  </channel>
+</rss>

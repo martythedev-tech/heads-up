@@ -31,6 +31,8 @@ from aiohttp import ClientSession, ClientTimeout, web
 import charts as C
 from dbutil import batch
 import exploits as X
+import backups as BK
+import health as H
 import msrc as MS
 import search as SR
 import truenas as TN
@@ -41,10 +43,11 @@ import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.13.1"
+VERSION = "0.14.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
+BACKUP_DIR = Path(os.environ.get("HU_BACKUP_DIR", STATE / "backups"))
 CREDS = Path(os.environ.get("CREDENTIALS_DIRECTORY", "/nonexistent"))
 DEV = os.environ.get("HU_DEV") == "1"
 BIND = os.environ.get("HU_BIND", "127.0.0.1" if DEV else "0.0.0.0")
@@ -304,7 +307,8 @@ class Fetcher:
                     ("truenas", 6 * 3600, self.truenas),
                     ("fortinet", 6 * 3600, self.fortinet),
                     ("enrich", 60 * 60, self.enrich),
-                    ("radar", 60 * 60, self.radar)]
+                    ("radar", 60 * 60, self.radar),
+                    ("backup", 24 * 3600, self.backup)]
             for name, every, job in jobs:
                 if force or self.due(name, every):
                     self.last_run[name] = now()
@@ -320,6 +324,10 @@ class Fetcher:
                         except Exception as e:
                             log(f"after refresh: {e!r}")
             self.rounds += 1
+
+    async def backup(self):
+        kept = await asyncio.to_thread(BK.run, STATE / "heads-up.db", BACKUP_DIR)
+        source_ok(self.db, "backup", kept)
 
     async def zero_wire(self):
         root = ET.fromstring(await self.get(ZERO_WIRE_RSS))
@@ -836,6 +844,13 @@ async def api_state(request):
     })
 
 
+async def api_health(request):
+    """For the watchdog or an outside monitor: small, and touches the database."""
+    request.app["db"].execute("SELECT 1").fetchone()
+    return web.json_response({"ok": True, "version": VERSION,
+                              "lastFetch": max(request.app["fetcher"].last_run.values(), default=None)})
+
+
 async def api_search(request):
     q = request.query.get("q", "").strip()[:120]
     if len(q) < 2:
@@ -939,6 +954,17 @@ async def notify_changes(app):
     if events:
         log("alerts: " + ", ".join(f"{e}:{v['id']}" for e, v, _ in events))
     await hooks.send(events)
+    await check_sources(app)
+
+
+async def check_sources(app):
+    """Say so when a source keeps failing or goes quiet, and when it recovers."""
+    if app["fetcher"].rounds == 0:  # the first round after a start is still filling in
+        return
+    note = H.message(*H.update(app["db"], now()))
+    if note:
+        log(f"sources: {note[0]}")
+        await app["hooks"].send_note("source", note[0], note[1], [], f"{app['hooks'].base_url}/")
 
 
 def background(app, coro):
@@ -1376,6 +1402,7 @@ def make_app(db, fetcher):
     app["users"].sync_bootstrap_admin(read_admin_hash(), log)
     app["hooks"] = W.Webhooks(db, read_settings_key(), PUBLIC_URL)
     app["fresh"] = app["hooks"].is_empty()
+    app["hooks"].adopt_source_event()
     fetcher.after_refresh = lambda: notify_changes(app)
     fetcher.radar_token = lambda: radar_token(app)
     fetcher.vulncheck_token = lambda: secret_setting(app, "vulncheck_token")
@@ -1406,6 +1433,7 @@ def make_app(db, fetcher):
     app.router.add_get("/", index)
     app.router.add_get("/api/state", api_state)
     app.router.add_get("/api/search", api_search)
+    app.router.add_get("/api/health", api_health)
     app.router.add_get("/api/history/{id}", api_history)
     app.router.add_post("/api/login", api_login)
     app.router.add_post("/api/logout", api_logout)

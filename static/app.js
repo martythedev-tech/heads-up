@@ -591,6 +591,7 @@ const EVENT_HELP = {
   soon: "A vulnerability appears in Patch soon (critical, not exploited yet).",
   updated: "Cloudflare changes its advice on something in Act now or Patch soon.",
   status: "Someone marks an item Investigating, Not affected or Patched.",
+  source: "Heads Up is down, or a source keeps failing or goes quiet: one message when it breaks and one when it recovers.",
   patch: "Microsoft publishes a month's security updates: one summary with zero-days, criticals and what to patch first.",
   routing: "A route hijack or leak involves one of the networks you watch (set under Cloudflare Radar).",
   fortinet: "Fortinet publishes advisories for your Fortinet products (or says one is exploited): one message per batch with scores and fixed versions.",

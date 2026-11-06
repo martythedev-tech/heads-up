@@ -1,0 +1,33 @@
+[Unit]
+Description=Heads Up watchdog (alerts when the dashboard is down)
+# A check must never be refused for having run too recently.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/heads-up/watchdog.py
+EnvironmentFile=/etc/heads-up/config.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+# Decrypts the stored webhook URLs. Runs as root only to read the app's
+# private state directory, which it reads and never writes.
+LoadCredentialEncrypted=settings-key:/etc/credstore.encrypted/heads-up.settings-key
+StateDirectory=heads-up-watchdog
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native

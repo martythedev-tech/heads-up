@@ -74,7 +74,7 @@ if [[ ! -f /etc/credstore.encrypted/heads-up.settings-key ]]; then
   chmod 600 /etc/credstore.encrypted/heads-up.settings-key
 fi
 
-install -m 644 deploy/heads-up.service /etc/systemd/system/heads-up.service
+install -m 644 deploy/heads-up.service deploy/heads-up-watchdog.service deploy/heads-up-watchdog.timer /etc/systemd/system/
 systemctl daemon-reload
 # 0.3 and earlier used one shared password; accounts replace it.
 rm -f /etc/credstore.encrypted/heads-up.login-hash
@@ -84,5 +84,6 @@ if [[ ! -f /etc/credstore.encrypted/heads-up.admin-hash ]]; then
 fi
 systemctl enable heads-up.service >/dev/null 2>&1
 systemctl restart heads-up.service
+systemctl enable --now heads-up-watchdog.timer >/dev/null 2>&1
 sleep 1
 systemctl is-active heads-up.service

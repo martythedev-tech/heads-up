@@ -218,6 +218,11 @@ choice of what to be told about:
 - **Routing incident on a watched network**: a route hijack or leak involves a network you watch
 - **New TrueNAS security advisory**: iXsystems published an advisory or impact statement
 - **New Fortinet advisories for your products**: one message per batch
+- **Heads Up or a source stops working**: a source keeps failing past its next
+  retry or goes quiet, or Heads Up itself is down or hung (checked every 5
+  minutes by a separate watchdog). One message when it breaks, one when it
+  recovers. The watchdog runs on the same server, so it can't report the server
+  being off: to catch that, point an outside monitor at `/api/health`
 
 Nothing is sent for what already exists when Heads Up first starts. More than
 four alerts at once arrive as one summary. Webhook URLs are stored encrypted.
@@ -278,6 +283,25 @@ sudo bash deploy/install.sh
 
 Settings, users, statuses, webhooks and the certificate are kept.
 
+### Backups
+
+Every night Heads Up copies its database, checks the copy and keeps the last 7
+in `/var/lib/private/heads-up/backups`. That covers statuses and their history,
+users, webhooks and settings. **They're on the same disk**, so they protect
+against mistakes and a damaged database, not a lost disk: copy them elsewhere if
+you need that. (`HU_BACKUP_DIR` changes the location; a path outside the state
+directory also needs `ReadWritePaths=` in the service.) To restore one:
+
+```sh
+sudo systemctl stop heads-up
+sudo sh -c 'cd /var/lib/private/heads-up && rm -f heads-up.db-wal heads-up.db-shm && cp -p backups/heads-up-YYYY-MM-DD.db heads-up.db'
+sudo systemctl start heads-up
+```
+
+Stored webhook URLs and tokens stay encrypted in the copy; restoring on another
+server also needs `/etc/credstore.encrypted/heads-up.settings-key` and that
+server's ability to decrypt it, or you'll have to add them again.
+
 ### Lost the admin password
 
 On the server, from the source directory:
@@ -322,7 +346,8 @@ one (the keyring entry is `service heads-up purpose admin`).
 ## How it's built
 
 A small aiohttp app (`app.py`; grouping in `vulns.py`, alerts in
-`webhooks.py`, accounts in `users.py`, search in `search.py`, charts and Radar in `charts.py`,
+`webhooks.py`, accounts in `users.py`, search in `search.py`, source health in
+`health.py`, backups in `backups.py`, the down alert in `watchdog.py`, charts and Radar in `charts.py`,
 exploit code in `exploits.py`, Microsoft in `msrc.py`, TrueNAS in `truenas.py`, Fortinet in `fortinet.py`, what we run in `inventory.py`, VulnCheck in
 `vulncheck.py`, transaction helper in `dbutil.py`) with a static front end and SQLite
 state, run by a hardened systemd unit (`DynamicUser`, read-only system,
@@ -331,6 +356,16 @@ secrets via `systemd-creds`). Run it locally without TLS:
 ```sh
 HU_DEV=1 HU_DEV_ADMIN_HASH=$(echo a-long-password | deploy/hash-password) python3 app.py
 # http://127.0.0.1:8765  (admin / a-long-password)
+```
+
+### Tests
+
+Needs `aiohttp` and `cryptography`; nothing touches a real server or sends a
+real alert:
+
+```sh
+python3 tests/run.py            # everything, offline, about a minute
+python3 tests/check_feeds.py    # fetches the real feeds: did a format change?
 ```
 
 ## License

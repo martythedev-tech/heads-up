@@ -14,6 +14,7 @@ Events:
   routing  a route hijack or leak involves a watched network
   truenas  iXsystems published a new TrueNAS advisory or impact statement
   fortinet Fortinet published advisories for your Fortinet products (or exploited ones)
+  source   Heads Up or one of its sources stopped working, or recovered
 """
 import asyncio
 import hashlib
@@ -35,10 +36,11 @@ EVENTS = {"act": "New in Act now", "soon": "New in Patch soon",
           "updated": "Cloudflare updated its guidance", "status": "Status changed",
           "patch": "Patch Tuesday is out", "routing": "Routing incident on a watched network",
           "truenas": "New TrueNAS security advisory",
-          "fortinet": "New Fortinet advisories for your products"}
-DEFAULT_EVENTS = ["act", "updated"]
-COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55", "routing": "#6250d6", "truenas": "#0095d5", "fortinet": "#c8312b"}
-ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹", "routing": "🛰️", "truenas": "🗄️", "fortinet": "🧱"}
+          "fortinet": "New Fortinet advisories for your products",
+          "source": "Heads Up or a source stops working"}
+DEFAULT_EVENTS = ["act", "updated", "source"]
+COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55", "routing": "#6250d6", "truenas": "#0095d5", "fortinet": "#c8312b", "source": "#8b929c"}
+ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹", "routing": "🛰️", "truenas": "🗄️", "fortinet": "🧱", "source": "⚠️"}
 BATCH_LIMIT = 4   # more events than this for one webhook in one go -> one summary message
 
 SCHEMA = """
@@ -388,6 +390,18 @@ class Webhooks:
         for row in self.db.execute("SELECT * FROM webhooks WHERE enabled=1").fetchall():
             if event in set(json.loads(row["events"] or "[]")):
                 await self.post(row, event, title, note_payload(row["kind"], event, title, body, facts, link))
+
+    def adopt_source_event(self):
+        """Existing webhooks start getting "Heads Up or a source stops working",
+        once, since nobody could opt in to it before it existed. Unticking it
+        afterwards sticks."""
+        if self.db.execute("SELECT 1 FROM meta WHERE key='source_event_adopted'").fetchone():
+            return
+        for row in self.db.execute("SELECT id, events FROM webhooks").fetchall():
+            events = json.loads(row["events"] or "[]")
+            if "source" not in events:
+                self.db.execute("UPDATE webhooks SET events=? WHERE id=?", (json.dumps(events + ["source"]), row["id"]))
+        self.db.execute("INSERT OR REPLACE INTO meta VALUES('source_event_adopted', '1')")
 
     # change detection
     def is_empty(self):
