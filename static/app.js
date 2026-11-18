@@ -570,6 +570,9 @@ async function saveTriage(id) {
   it.triage = await r.json();
   toast(`Marked ${STATE_LABEL[state]}`);
   render();
+  // The server decides the groups (vulns.py), so fetch them again: without this the
+  // item stayed in its old group until the next 2-minute refresh.
+  await load();
 }
 
 // --- webhooks -------------------------------------------------------------------------
