@@ -771,8 +771,8 @@ function invFormBox(e) {
     <label>Words that identify it in the feeds<input name="terms" maxlength="400" value="${esc((e.terms || []).join(", "))}" placeholder="Comma-separated. Empty = the product name"></label>
     <p class="help small">Whole words, any case, matched against product names only (not descriptions). FortiGate shows up as <b>FortiOS</b> in Fortinet's and CISA's lists, so use “FortiGate, FortiOS”.</p>
     <div class="inv-preview" id="inv-preview"></div>
-    <label>Versions we run (optional)<input name="version" maxlength="120" value="${esc(e.version || "")}" placeholder="e.g. 7.4.8, or 7.4.8, 7.6.3 when boxes differ"></label>
-    <p class="help small">Fortinet and TrueNAS advisories are checked against these: when every version you run already has the fix, the item moves to Done by itself. Other sources don't publish fixed versions, so there it's a note.</p>
+    <label>Versions we run (optional)<input name="version" maxlength="120" value="${esc(e.version || "")}" placeholder="e.g. 7.4.8 · 7.4.8, 7.6.3 when boxes differ · 7.4.x for a mix"></label>
+    <p class="help small">Fortinet and TrueNAS advisories are checked against these: when every version you run already has the fix, the item moves to Done by itself. Other sources don't publish fixed versions, so there it's a note. Use 7.4.x when you have several patch levels on one line: Heads Up then tells you which version to check for, but won't close the item by itself.</p>
     <label>Note (optional)<input name="note" maxlength="200" value="${esc(e.note || "")}" placeholder="e.g. 2 firewalls at HQ, owner: network team"></label>
     <p class="err" id="inv-err"></p>
     <div class="actions"><button type="button" class="ghost" id="inv-cancel">Cancel</button><button class="primary">${isNew ? "Add" : "Save"}</button></div>

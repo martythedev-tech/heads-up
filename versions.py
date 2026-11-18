@@ -6,24 +6,31 @@ Only sources that state fixes in a form that can be compared take part:
   TrueNAS   the "Fixed in" field, e.g. "TrueNAS SCALE 25.10.8 and later (25.10 train)"
 
 A version is compared within its release line (the first two numbers: 7.4.8 is
-on the 7.4 line). Anything that can't be decided stays open: a line with no
+on the 7.4 line). "7.4.x" or a bare "7.4" means "somewhere on the 7.4 line"
+(several boxes or clients on different patch levels): it is never counted as
+fixed, it says which version to check for instead. Anything that can't be decided stays open: a line with no
 fix listed, wording that doesn't parse, or a product with no version entered.
 """
 import re
 
-VER = re.compile(r"(?<![\d.])\d+(?:\.\d+)+")
+VER = re.compile(r"(?<![\d.])\d+(?:\.\d+)+(?:\.[xX*])?")
 FN_LINE = re.compile(r"^(?P<product>.+?)\s+(?P<train>\d+\.\d+)(?:\.x)?\s*:\s*(?P<text>.+)$", re.I)
 FN_UPGRADE = re.compile(r"Upgrade to (?P<upcoming>upcoming )?(?:version )?(?P<ver>\d+(?:\.\d+)+)", re.I)
 FN_MIGRATE = re.compile(r"Migrate to a fixed release", re.I)
 
 
 def parse(text):
-    """'7.4.8, 7.6.3' -> ['7.4.8', '7.6.3'] (versions need at least two numbers)."""
-    return list(dict.fromkeys(VER.findall(str(text or ""))))
+    """'7.4.8, 7.6.x' -> ['7.4.8', '7.6.x'] (versions need at least two numbers)."""
+    return list(dict.fromkeys(v[:-1] + "x" if v[-1] in "X*" else v for v in VER.findall(str(text or ""))))
 
 
 def key(ver):
-    return tuple(int(x) for x in ver.split("."))
+    return tuple(int(x) for x in ver.split(".") if x.isdigit())
+
+
+def whole_line(ver):
+    """'7.4.x' or '7.4': a release line, not an exact version."""
+    return ver.endswith(".x") or len(key(ver)) < 3
 
 
 def line_of(ver):
@@ -59,7 +66,7 @@ def check(entries, fixes):
 
     Returns None when no entry with versions has fix data here, else
     {"fixed": bool (every matched entry is on a fixed version), "notes": [...]}, where
-    each note is {product, version, state, fix}; state is fixed / upgrade / upcoming /
+    each note is {product, version, state, fix}; state is fixed / upgrade / upcoming / line (a whole line like 7.4.x) /
     migrate / unlisted, or noversion for a matched entry with no version entered.
     """
     notes, checked = [], False
@@ -82,6 +89,8 @@ def check(entries, fixes):
                 state, fix = "unlisted", None
             elif f["migrate"]:
                 state, fix = "migrate", None
+            elif whole_line(ver):
+                state, fix = ("upcoming" if f["upcoming"] else "line"), f["fixed"]
             elif key(ver) >= key(f["fixed"]):
                 state, fix = "fixed", f["fixed"]
             else:
@@ -103,6 +112,8 @@ def why(result):
             out += [[run + ": ", False], ["already fixed", True], [f" (fix {n['fix']}).", False]]
         elif n["state"] == "upgrade":
             out += [[run + ": ", False], [f"upgrade to {n['fix']}", True], [".", False]]
+        elif n["state"] == "line":
+            out += [[run + ": ", False], [f"make sure each one is on {n['fix']} or later", True], [".", False]]
         elif n["state"] == "upcoming":
             out += [[run + ": ", False], [f"upgrade to {n['fix']}", True], [" when it's released.", False]]
         elif n["state"] == "migrate":

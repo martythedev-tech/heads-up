@@ -92,6 +92,23 @@ def test_truenas_fixed_in():
     assert states(VS.check([{**tn, "version": "25.04.2"}], f)) == [("25.04.2", "unlisted", None)]
 
 
+def test_whole_line_is_never_fixed_and_says_what_to_check():
+    assert VS.parse("7.4.x, 7.6.X, 7.2.*") == ["7.4.x", "7.6.x", "7.2.x"]
+    assert states(run("7.6.x")) == [("7.6.x", "line", "7.6.8")]
+    assert states(run("7.6")) == [("7.6", "line", "7.6.8")]
+    assert states(run("7.4.x")) == [("7.4.x", "upcoming", "7.4.12")]
+    assert states(run("7.2.x")) == [("7.2.x", "migrate", None)]
+    assert states(run("7.0.x")) == [("7.0.x", "unlisted", None)]
+    assert not run("7.6.x")["fixed"]
+    text = "".join(t for t, _ in VS.why(run("7.6.x")))
+    assert text == " You run FortiAnalyzer 7.6.x: make sure each one is on 7.6.8 or later.", text
+
+
+def test_exact_and_whole_line_together():
+    r = run("7.6.9, 8.0.x")
+    assert not r["fixed"] and states(r) == [("7.6.9", "fixed", "7.6.8"), ("8.0.x", "line", "8.0.2")]
+
+
 # --- through build_state, as the page and the webhooks see it ----------------------
 
 def fresh():

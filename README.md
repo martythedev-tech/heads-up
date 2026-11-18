@@ -55,7 +55,9 @@ High/Critical) to **Patch soon**. When the only link is a TrueNAS impact
 statement rating it Low/Medium on TrueNAS, the vendor's rating wins (Patch soon
 at most); a TrueNAS "not affected" statement doesn't count as a match.
 Each entry can also hold the **versions you run**, comma-separated when boxes
-differ ("7.4.8, 7.6.3"). Fortinet's fixed versions per release line and
+differ ("7.4.8, 7.6.3"), or a whole release line ("7.4.x") when several patch
+levels are in use; a whole line is never counted as fixed, it says which
+version to check for. Fortinet's fixed versions per release line and
 TrueNAS's "Fixed in" are compared with them: when every version you run
 already has the fix, the item moves to **Done** marked FIXED IN YOURS;
 otherwise it says what to do ("You run FortiOS 7.4.8: upgrade to 7.4.9", "no
