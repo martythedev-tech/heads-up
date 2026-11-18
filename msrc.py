@@ -2,7 +2,12 @@
 
 Only Microsoft's own fixes (issuingCna = Microsoft), not the open-source
 packages Microsoft also ships for Azure Linux. The three most recent
-monthly releases are kept.
+monthly releases are kept in full.
+
+For "What we run" (a month you're patched through), every Microsoft CVE on the
+list also needs the month Microsoft fixed it in. msrc_cve keeps that for CVEs
+outside the three releases: releases that age out are copied there, and older
+CVEs that CISA or VulnCheck list are looked up once in the update guide.
 """
 import asyncio
 import json
@@ -19,7 +24,10 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS msrc (
   cve TEXT PRIMARY KEY, release TEXT, released TEXT, title TEXT, tag TEXT, severity TEXT,
   impact TEXT, exploited INTEGER, disclosed INTEGER, likelihood TEXT, cvss REAL, action INTEGER);
+CREATE TABLE IF NOT EXISTS msrc_cve (
+  cve TEXT PRIMARY KEY, release TEXT, released TEXT, tag TEXT, looked REAL);
 """
+LOOKUP_RETRY = 7 * 86400   # a CVE Microsoft had nothing for is asked again after a week
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 SEV_RANK = {"Critical": 3, "Important": 2, "Moderate": 1, "Low": 0}
 
@@ -35,6 +43,12 @@ def recent_releases(today=None, n=3):
         out.append(f"{d.year}-{MONTHS[d.month - 1]}")
         d = (d - timedelta(days=1)).replace(day=1)
     return out
+
+
+def release_key(release):
+    """'2026-Nov' -> (2026, 11)"""
+    y, m = release.split("-")
+    return int(y), MONTHS.index(m) + 1
 
 
 def release_label(release):
@@ -81,8 +95,62 @@ async def refresh(db, session):
             db.execute("DELETE FROM msrc WHERE release=?", (release,))
             db.executemany("INSERT OR REPLACE INTO msrc VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", rows)
         total += len(rows)
-    db.execute(f"DELETE FROM msrc WHERE release NOT IN ({','.join('?' * len(keep))})", keep)
+    marks = ",".join("?" * len(keep))
+    # keep the fix month of releases that age out
+    db.execute(f"INSERT OR REPLACE INTO msrc_cve SELECT cve, release, released, tag, ? FROM msrc WHERE release NOT IN ({marks})",
+               (time.time(), *keep))
+    db.execute(f"DELETE FROM msrc WHERE release NOT IN ({marks})", keep)
     return total
+
+
+def lookup_candidates(db, limit):
+    """Microsoft CVEs on the list (CISA / VulnCheck) with no known fix month."""
+    known = {r[0] for r in db.execute("SELECT cve FROM msrc")}
+    known |= {r[0] for r in db.execute("SELECT cve FROM msrc_cve WHERE release IS NOT NULL OR looked > ?",
+                                       (time.time() - LOOKUP_RETRY,))}
+    out = []
+    for r in db.execute("SELECT cves FROM items WHERE active=1 AND source IN ('kev', 'vulncheck')"
+                        " AND (title LIKE '%Microsoft%' OR title LIKE '%Windows%') ORDER BY published DESC"):
+        for c in json.loads(r[0] or "[]"):
+            if c not in known and c not in out:
+                out.append(c)
+    return out[:limit]
+
+
+async def lookup_old(db, session, limit=60):
+    """Ask the update guide for the release that fixed each CVE outside the kept months."""
+    found = 0
+    for cve in lookup_candidates(db, limit):
+        try:
+            params = {"$filter": f"cveNumber eq '{cve}'"}
+            async with session.get(SUG, params=params, timeout=ClientTimeout(total=30)) as r:
+                if r.status != 200:
+                    continue
+                rows = (await r.json(content_type=None)).get("value") or []
+        except Exception:
+            continue
+        hit = next((x for x in rows if x.get("releaseNumber") and not x.get("isMariner")), None)
+        db.execute("INSERT OR REPLACE INTO msrc_cve VALUES(?,?,?,?,?)",
+                   (cve, hit["releaseNumber"] if hit else None, (hit.get("releaseDate") or "")[:10] if hit else None,
+                    hit.get("tag") if hit else None, time.time()))
+        found += bool(hit)
+        await asyncio.sleep(0.3)
+    return found
+
+
+def fix_months(db, cve_ids):
+    """CVE -> the Microsoft release that fixed it, from the kept months or msrc_cve."""
+    out = {}
+    ids = list(cve_ids)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        for r in db.execute(f"SELECT cve, release, tag FROM msrc_cve WHERE release IS NOT NULL AND cve IN ({marks})", chunk):
+            out[r["cve"]] = r
+        for r in db.execute(f"SELECT cve, release, tag FROM msrc WHERE cve IN ({marks})", chunk):
+            out[r["cve"]] = r
+    return {c: {"release": r["release"], "label": release_label(r["release"]), "month": list(release_key(r["release"])),
+                "product": r["tag"]} for c, r in out.items()}
 
 
 def zero_day_items(db):

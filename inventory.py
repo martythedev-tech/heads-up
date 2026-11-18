@@ -9,6 +9,8 @@ packages, Cloudflare's title and topics), never against free text, so
 The version box takes the versions you run, comma-separated ("7.4.8, 7.6.3"
 when boxes differ). Fortinet and TrueNAS advisories are checked against them
 (versions.py): an item every version you run is fixed for moves to Done.
+For Microsoft products the box takes the month you're patched through
+("2026-11"), compared with the Patch Tuesday that fixed each CVE.
 Other sources don't publish fixed versions in a usable form, so for them it
 stays a note.
 """

@@ -242,4 +242,135 @@ def test_a_status_someone_set_wins():
     assert vuln(db, "7.6.9")["group"] == "done"
 
 
+# --- Microsoft: the month you're patched through ------------------------------------
+
+WIN = {"name": "Microsoft Windows", "terms": ["Microsoft Windows", "Windows"]}
+
+
+def test_parse_month():
+    assert VS.parse_month("2026-11") == (2026, 11)
+    assert VS.parse_month("November 2026") == (2026, 11) and VS.parse_month("nov 2026") == (2026, 11)
+    assert VS.parse_month("2026-09, 2026-11") == (2026, 11)
+    assert VS.parse_month("11") is None and VS.parse_month("7.4.8") is None and VS.parse_month("") is None
+    assert VS.parse("2026-11") == []      # a month is not a version number
+
+
+def ms(*releases):
+    import msrc as MS
+    return VS.ms_fixes([{"release": r, "label": MS.release_label(r), "month": list(MS.release_key(r)),
+                         "product": "Windows Shell"} for r in releases])
+
+
+def test_month_at_or_after_the_fix_is_fixed():
+    r = VS.check([{**WIN, "version": "2026-11"}], [], (), ms("2026-Oct"))
+    assert r["fixed"] and r["notes"][0]["state"] == "msfixed" and r["notes"][0]["fix"] == "October 2026", r
+    assert VS.check([{**WIN, "version": "October 2026"}], [], (), ms("2026-Oct"))["fixed"]
+
+
+def test_older_month_says_which_update():
+    r = VS.check([{**WIN, "version": "2026-08"}], [], (), ms("2026-Oct"))
+    assert not r["fixed"] and r["notes"][0]["state"] == "msupdate"
+    text = "".join(t for t, _ in VS.why(r))
+    assert text == " Microsoft Windows patched through August 2026: install the October 2026 update or later.", text
+
+
+def test_newest_fix_month_counts_when_cves_differ():
+    assert not VS.check([{**WIN, "version": "2026-09"}], [], (), ms("2026-Jul", "2026-Oct"))["fixed"]
+
+
+def test_no_month_or_no_fix_month_decides_nothing():
+    assert VS.check([{**WIN, "version": "11"}], [], (), ms("2026-Oct")) is None
+    assert VS.check([{**WIN, "version": "2026-11"}], [], (), ()) is None
+
+
+def fresh_ms(release):
+    db = app.db_open()
+    for t in ("items", "cve", "msrc", "msrc_cve", "triage", "inventory"):
+        db.execute(f"DELETE FROM {t}")
+    db.execute("INSERT INTO items(id, source, title, link, published, updated, category, headline, summary, body, cves, tags, extra, fingerprint, first_seen, changed_at, active)"
+               " VALUES('vc:CVE-2026-54121','vulncheck','Microsoft Windows','https://x/2','2026-11-11','2026-11-11','','','Improper Authorization','','[\"CVE-2026-54121\"]','[\"Windows\"]','{}','x',0,0,1)")
+    db.execute("INSERT OR IGNORE INTO cve(id) VALUES('CVE-2026-54121')")
+    if release:
+        db.execute("INSERT INTO msrc_cve VALUES('CVE-2026-54121', ?, '2026-07-14', 'Active Directory Certificate Services (AD CS)', 0)", (release,))
+    return db
+
+
+def ms_vuln(db, version):
+    return next(v for v in app.build_state(db, [{**WIN, "version": version}])["vulns"] if v["id"] == "vc:CVE-2026-54121")
+
+
+def test_old_microsoft_cve_closes_through_build_state():
+    db = fresh_ms("2026-Jul")
+    v = ms_vuln(db, "2026-11")
+    assert v["group"] == "done" and v["autoDone"], v["group"]
+    assert why(v) == ("Fixed in the version you run: Microsoft Windows patched through November 2026"
+                      " (fixed in the July 2026 update)."), why(v)
+
+
+def test_old_microsoft_cve_shows_its_fix_month_without_a_version():
+    v = ms_vuln(fresh_ms("2026-Jul"), "")
+    assert v["group"] != "done" and "Microsoft fix out (July 2026 updates)." in why(v), why(v)
+
+
+def test_unknown_fix_month_stays_open():
+    v = ms_vuln(fresh_ms(None), "2026-11")
+    assert v["group"] != "done" and v["versionCheck"] is None
+
+
+def test_lookup_stores_the_fix_month_and_remembers_misses():
+    import asyncio
+    import msrc as MS
+    db = fresh_ms(None)
+
+    class Resp:
+        def __init__(self, body):
+            self.status, self.body = 200, body
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def json(self, content_type=None):
+            return self.body
+
+    class Session:
+        calls = []
+
+        def get(self, url, params=None, timeout=None):
+            self.calls.append(params["$filter"])
+            return Resp({"value": [{"releaseNumber": "2026-Jul", "releaseDate": "2026-07-14T07:00:00Z", "tag": "AD CS"}]})
+
+    real = MS.asyncio.sleep
+
+    async def fast(_):
+        await real(0)
+
+    MS.asyncio.sleep = fast
+    s = Session()
+    assert asyncio.run(MS.lookup_old(db, s)) == 1
+    assert s.calls == ["cveNumber eq 'CVE-2026-54121'"]
+    assert MS.fix_months(db, ["CVE-2026-54121"])["CVE-2026-54121"]["label"] == "July 2026"
+    assert asyncio.run(MS.lookup_old(db, s)) == 0 and len(s.calls) == 1   # not asked twice
+    MS.asyncio.sleep = real
+
+
+def test_releases_that_age_out_keep_their_fix_month():
+    import msrc as MS
+    db = fresh_ms(None)
+    db.execute("INSERT INTO msrc(cve, release, released, title, tag) VALUES('CVE-2026-1','2025-Jan','2025-01-14','t','Windows Kernel')")
+
+    async def nothing(session, release):
+        return []
+
+    real = MS.fetch_release
+    MS.fetch_release = nothing
+    import asyncio
+    asyncio.run(MS.refresh(db, None))
+    MS.fetch_release = real
+    assert db.execute("SELECT COUNT(*) FROM msrc WHERE cve='CVE-2026-1'").fetchone()[0] == 0
+    assert MS.fix_months(db, ["CVE-2026-1"])["CVE-2026-1"]["label"] == "January 2025"
+
+
 helpers.run_tests(globals())

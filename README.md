@@ -67,8 +67,14 @@ otherwise it says what to do ("You run FortiOS 7.4.8: upgrade to 7.4.9", "no
 fix on the 7.2 line, move to a fixed release"). A release line the vendor
 lists no fix for, an item that also matches a product without version data,
 or wording that doesn't parse leaves the item where it was, and a status
-someone set by hand always wins. Other sources don't publish fixed versions in
-a usable form, so for them the version is a note. Editing the list doesn't
+someone set by hand always wins. For **Microsoft** products, enter the month you're patched through instead
+("2026-11" once November's Patch Tuesday update is on every machine): every
+item Microsoft fixed in that month or earlier moves to Done, and older ones
+say which update to install. Windows updates are cumulative, so one month
+covers everything before it. The fix month comes from the update guide: the
+last three releases in full, and older CVEs on the list looked up once.
+Other sources don't publish fixed versions in a usable form, so for them the
+version is a note. Editing the list doesn't
 send webhook alerts for the entries it moves.
 
 Not yet exploited items move to **Patch soon** when they are critical, rated

@@ -10,6 +10,10 @@ affected version ranges in the same file decide: inside a range is affected,
 above every range on that line is fixed, a line with no affected range isn't
 affected.
 
+Microsoft: Windows and most Microsoft products patch by monthly cumulative
+updates, so the "version" is the month you're patched through ("2026-11" or
+"November 2026"). An item Microsoft fixed in that month or earlier is fixed.
+
 A version is compared within its release line (the first two numbers: 7.4.8 is
 on the 7.4 line). "7.4.x" or a bare "7.4" means "somewhere on the 7.4 line"
 (several boxes or clients on different patch levels): it is never counted as
@@ -22,6 +26,31 @@ VER = re.compile(r"(?<![\d.])\d+(?:\.\d+)+(?:\.[xX*])?")
 FN_LINE = re.compile(r"^(?P<product>.+?)\s+(?P<train>\d+\.\d+)(?:\.x)?\s*:\s*(?P<text>.+)$", re.I)
 FN_UPGRADE = re.compile(r"Upgrade to (?P<upcoming>upcoming )?(?:version )?(?P<ver>\d+(?:\.\d+)+)", re.I)
 FN_MIGRATE = re.compile(r"Migrate to a fixed release", re.I)
+
+
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+               "October", "November", "December"]
+MONTH_NUM = re.compile(r"(?<![\d.])(20\d\d)-(0?[1-9]|1[0-2])(?![\d.])")
+MONTH_WORD = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(20\d\d)\b", re.I)
+
+
+def parse_month(text):
+    """'2026-11' or 'November 2026' -> (2026, 11): the Patch Tuesday you're patched through
+    (the latest one named), or None."""
+    t = str(text or "")
+    found = [(int(y), int(m)) for y, m in MONTH_NUM.findall(t)]
+    found += [(int(y), [n[:3].lower() for n in MONTH_NAMES].index(w[:3].lower()) + 1) for w, y in MONTH_WORD.findall(t)]
+    return max(found) if found else None
+
+
+def month_label(month):
+    return f"{MONTH_NAMES[month[1] - 1]} {month[0]}"
+
+
+def ms_fixes(infos):
+    """The msFix of an item's CVEs -> [{product, month, label}]."""
+    return [{"product": f.get("product") or "Microsoft", "month": tuple(f["month"]), "label": f["label"]}
+            for f in infos if f and f.get("month")]
 
 
 def parse(text):
@@ -99,11 +128,13 @@ def from_ranges(product, ver, ranges):
     return "notaffected", None, None
 
 
-def check(entries, fixes, ranges=()):
+def check(entries, fixes, ranges=(), ms=()):
     """entries: the What we run entries this item matched, each {name, terms, version}.
     fixes: everything fortinet_fixes / truenas_fixes found for this item, all vendors together.
     ranges: Fortinet's affected version ranges (fortinet_ranges), used for a product
     the fix lines leave out.
+    ms: the Microsoft releases that fixed the item's CVEs (ms_fixes), compared with a
+    month in the entry's version box.
 
     Returns None when no entry with versions has data here, else
     {"fixed": bool (every matched entry is on a fixed or unaffected version), "notes": [...]},
@@ -111,6 +142,7 @@ def check(entries, fixes, ranges=()):
       fixed / notaffected                     counts as done
       upgrade / upcoming / migrate / line     from a fix line (line = a whole line like 7.4.x)
       affected / affectedline / rangeline     from the ranges (no fix version known)
+      msfixed / msupdate                      Microsoft: patched through a month at or after the fix, or not
       unlisted                                a fix line exists for another line only
       nodata / noversion                      nothing to compare, or no version entered
     """
@@ -120,6 +152,14 @@ def check(entries, fixes, ranges=()):
         mine = [f for f in fixes if f["product"].lower() in terms]
         mine_r = [r for r in ranges if r["product"].lower() in terms]
         versions = parse(e.get("version"))
+        month = parse_month(e.get("version"))
+        if ms and month:
+            checked = True
+            need = max(ms, key=lambda f: f["month"])
+            notes.append({"product": e["name"], "version": f"patched through {month_label(month)}",
+                          "state": "msfixed" if month >= need["month"] else "msupdate", "fix": need["label"],
+                          "upto": None, "vendor": "Microsoft"})
+            continue
         if not mine and not mine_r:
             notes.append({"product": e["name"], "version": None, "state": "nodata", "fix": None})
             continue
@@ -151,7 +191,10 @@ def check(entries, fixes, ranges=()):
                           "vendor": vendor})
     if not checked:
         return None
-    return {"fixed": all(n["state"] in ("fixed", "notaffected") for n in notes), "notes": notes}
+    return {"fixed": all(n["state"] in DONE_STATES for n in notes), "notes": notes}
+
+
+DONE_STATES = ("fixed", "notaffected", "msfixed")
 
 
 def _line(ver):
@@ -166,7 +209,13 @@ def why(result):
             continue
         run = f" You run {n['product']} {n['version']}"
         st = n["state"]
-        if st == "fixed":
+        if st == "msfixed":
+            out += [[f" {n['product']} {n['version']}: ", False], ["already fixed", True],
+                    [f" (in the {n['fix']} update).", False]]
+        elif st == "msupdate":
+            out += [[f" {n['product']} {n['version']}: ", False], [f"install the {n['fix']} update", True],
+                    [" or later.", False]]
+        elif st == "fixed":
             basis = f"fix {n['fix']}" if n.get("fix") else f"affected up to {n['upto']}"
             out += [[run + ": ", False], ["already fixed", True], [f" ({basis}).", False]]
         elif st == "notaffected":
@@ -198,7 +247,9 @@ def why_done(result):
     def basis(n):
         if n["state"] == "notaffected":
             return "not listed as affected"
+        if n["state"] == "msfixed":
+            return f"fixed in the {n['fix']} update"
         return f"fix {n['fix']}" if n.get("fix") else f"affected up to {n['upto']}"
     runs = ", ".join(f"{n['product']} {n['version']} ({basis(n)})" for n in result["notes"]
-                     if n["state"] in ("fixed", "notaffected"))
+                     if n["state"] in DONE_STATES)
     return [["Fixed in the version you run", True], [f": {runs}.", False]]

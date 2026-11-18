@@ -19,7 +19,8 @@ Groups:
   act    exploited, whatever its age or source (no "check whether you run it")
   soon   not exploited but serious: CVSS >= 7, Ubuntu high/critical, TrueNAS
          High/Critical, or any Cloudflare briefing
-  done   every version you run already has Fortinet's / TrueNAS's fix
+  done   every version you run already has Fortinet's / TrueNAS's fix, or the
+         month you're patched through is at or after Microsoft's fix
          (versions.py), unless someone set a status by hand
 """
 import re
@@ -274,8 +275,10 @@ def describe(v, releases, today, entries=None):
     fixes = [f for page in fn_pages.values() for f in VS.fortinet_fixes(page.get("fixes"))]
     fixes += [f for page in tn_pages.values() for f in VS.truenas_fixes(page.get("fixedIn"))]
     ranges = VS.fortinet_ranges([r for page in fn_pages.values() for r in page.get("ranges") or []])
-    vcheck = (VS.check([entries[n] for n in ours if n in (entries or {})], fixes, ranges)
-              if ours and (fixes or ranges) else None)
+    ms_fix = VS.ms_fixes([c.get("msFix") for c in cves])
+    vcheck = (VS.check([entries[n] for n in ours if n in (entries or {})], fixes, ranges, ms_fix)
+              if ours and (fixes or ranges or ms_fix) else None)
+    ms_noted = bool(vcheck) and any(n.get("vendor") == "Microsoft" for n in vcheck["notes"])
     triage = p.get("triage")
     manual = (triage or {}).get("state") not in (None, "untriaged")
     # a status someone set wins over the version check
@@ -392,8 +395,10 @@ def describe(v, releases, today, entries=None):
         why += [[" TrueNAS fix: ", False], [tn["fixedIn"], True], [".", False]]
     if not done and vcheck:
         why += VS.why(vcheck)
-    if not done and ms_info:
+    if not done and not ms_noted and ms_info:
         why += [[f" Microsoft fix out ({ms_info[0]['releaseLabel']} updates).", False]]
+    elif not done and not ms_noted and ms_fix:
+        why += [[f" Microsoft fix out ({max(ms_fix, key=lambda f: f['month'])['label']} updates).", False]]
     if not done and not v["usnPrimary"]:
         if ubuntu["fixed"]:
             why += [[f" Ubuntu fix out for {', '.join(ubuntu['fixed'])}.", False]]

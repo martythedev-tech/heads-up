@@ -43,7 +43,7 @@ import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.15.2"
+VERSION = "0.16.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -473,6 +473,8 @@ class Fetcher:
     async def msrc(self):
         n = await MS.refresh(self.db, self.session)
         self.sync_ms_items()
+        # fix months for older Microsoft CVEs on the list (What we run: "patched through")
+        await MS.lookup_old(self.db, self.session)
         source_ok(self.db, "msrc", n)
         if self.on_patch_tuesday:
             await self.on_patch_tuesday()
@@ -812,6 +814,8 @@ def build_state(db, inventory=None):
     for cve_id, info in MS.cve_info(db, cves).items():
         cves[cve_id]["msrc"] = info
         use_vendor_score(cves[cve_id], info, "Microsoft")
+    for cve_id, fix in MS.fix_months(db, cves).items():
+        cves[cve_id]["msFix"] = fix
     for cve_id, info in FN.cve_info(db, cves).items():
         cves[cve_id]["fortinet"] = info
         use_vendor_score(cves[cve_id], info, "Fortinet")
