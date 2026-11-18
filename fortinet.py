@@ -10,7 +10,10 @@ about non-Fortinet bugs (Linux kernel, Node.js); they have no product list and
 are only attached to entries that already exist for those CVEs.
 
 Rows are kept after they leave the 50-item feed, and a CSAF file is fetched
-again only when the advisory's date in the feed changes.
+again only when the advisory's date in the feed changes. Each row also keeps
+the affected version ranges per product (for "What we run" versions); rows
+stored before ranges existed are filled in once, from the feed or from the
+CSAF address the title gives.
 """
 import asyncio
 import html
@@ -36,7 +39,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS fortinet (
   id TEXT PRIMARY KEY, title TEXT, link TEXT, feed_date TEXT, published TEXT, revised TEXT,
   cvss REAL, products TEXT, cves TEXT, exploited INTEGER, summary TEXT, fixes TEXT,
-  workaround TEXT, kind TEXT);
+  workaround TEXT, kind TEXT, ranges TEXT, csaf TEXT);
 """
 EXPLOITED_RE = re.compile(r"exploited in the wild|observed[^.]{0,60}exploit", re.I)
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}")
@@ -44,6 +47,66 @@ CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}")
 
 def migrate(db):
     db.executescript(SCHEMA)
+    cols = {r[1] for r in db.execute("PRAGMA table_info(fortinet)")}
+    for col in ("ranges", "csaf"):
+        if col not in cols:
+            db.execute(f"ALTER TABLE fortinet ADD COLUMN {col} TEXT")
+
+
+RANGE_RE = re.compile(r"^>=\s*(\d+(?:\.\d+)+)\s*(?:\||and)\s*<=\s*(\d+(?:\.\d+)+)$")
+ALL_RE = re.compile(r"^(\d+\.\d+)\s+all versions$", re.I)
+ONE_RE = re.compile(r"^(\d+(?:\.\d+){2,})$")
+AFFECTED = ("known_affected", "first_affected", "last_affected", "under_investigation")
+NOT_AFFECTED = ("known_not_affected", "fixed", "first_fixed")
+
+
+def parse_ranges(doc):
+    """The version ranges in a CSAF product tree, each marked affected or not.
+
+    Names look like "FortiOS/>=7.4.0|<=7.4.8", "FortiMail/>= 7.6.0 and <= 7.6.6",
+    "FortiAnalyzer/ 8.0 all versions" or "FortiRecorder/7.6.0". A range with no
+    status at all counts as affected: in FG-IR-26-227 FortiAnalyzer is affected on
+    the advisory page but missing from the file's status lists.
+    """
+    status = {}
+    for v in doc.get("vulnerabilities") or []:
+        for k, ids in (v.get("product_status") or {}).items():
+            for i in ids:
+                status.setdefault(i, set()).add(k)
+    out = []
+
+    def walk(b, product=None):
+        if b.get("category") == "product":
+            product = b.get("name")
+        if product and b.get("category") in ("product_version_range", "product_version"):
+            spec = (b.get("name") or "").split("/", 1)[-1].strip()
+            pid = (b.get("product") or {}).get("product_id")
+            st = status.get(pid, set())
+            affected = bool(st & set(AFFECTED)) or not (st & set(NOT_AFFECTED))
+            m = RANGE_RE.match(spec)
+            if m:
+                lo, hi = m.groups()
+                out.append({"product": product, "line": [int(x) for x in lo.split(".")[:2]], "min": lo, "max": hi,
+                            "all": False, "affected": affected})
+            elif ALL_RE.match(spec):
+                line = ALL_RE.match(spec).group(1)
+                out.append({"product": product, "line": [int(x) for x in line.split(".")], "min": None, "max": None,
+                            "all": True, "affected": affected})
+            elif ONE_RE.match(spec):
+                out.append({"product": product, "line": [int(x) for x in spec.split(".")[:2]], "min": spec, "max": spec,
+                            "all": False, "affected": affected})
+        for c in b.get("branches") or []:
+            walk(c, product)
+
+    for b in (doc.get("product_tree") or {}).get("branches") or []:
+        walk(b)
+    return out
+
+
+def csaf_url(advisory_id, title):
+    """Fortinet names CSAF files after the title: csaf_<title-slug>_<id>.json."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")
+    return f"https://filestore.fortinet.com/fortiguard/psirt/csaf_{slug}_{advisory_id.lower()}.json"
 
 
 def watched(product, products=None):
@@ -119,7 +182,7 @@ def parse_csaf(doc, feed_desc=""):
         "revised": (tracking.get("current_release_date") or "")[:10] or None,
         "cvss": max(scores) if scores else None, "products": products, "cves": cves,
         "exploited": exploited, "fixes": fixes[:12], "workaround": " ".join(work)[:600],
-        "kind": "advisory" if vulns else "statement",
+        "kind": "advisory" if vulns else "statement", "ranges": parse_ranges(doc),
     }
 
 
@@ -149,7 +212,7 @@ async def refresh(db, session):
         entries = feed_entries(await r.text())
     if not entries:
         raise RuntimeError("Fortinet PSIRT feed: no advisories")
-    known = {r["id"]: r["feed_date"] for r in db.execute("SELECT id, feed_date FROM fortinet")}
+    known = {r["id"]: r["feed_date"] for r in db.execute("SELECT id, feed_date FROM fortinet WHERE ranges IS NOT NULL")}
     rows, errors = [], 0
     for e in entries:
         if e["id"] in known and known[e["id"]] == e["feed_date"]:
@@ -166,14 +229,40 @@ async def refresh(db, session):
         rows.append((e["id"], p["title"] or e["title"], e["link"], e["feed_date"], p["published"] or e["feed_date"],
                      p["revised"] or e["feed_date"], p["cvss"] if p["cvss"] is not None else e["cvss"],
                      json.dumps(p["products"]), ",".join(p["cves"]), int(p["exploited"]), feed_summary(e["desc"]),
-                     json.dumps(p["fixes"]), p["workaround"], p["kind"]))
+                     json.dumps(p["fixes"]), p["workaround"], p["kind"], json.dumps(p["ranges"]), e["csaf"]))
         await asyncio.sleep(0.3)
     if rows:
         with batch(db):
-            db.executemany("INSERT OR REPLACE INTO fortinet VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            db.executemany("INSERT OR REPLACE INTO fortinet VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     if errors and errors == len(rows) + errors:
         raise RuntimeError(f"Fortinet PSIRT: could not fetch {errors} advisory file(s)")
+    await backfill_ranges(db, session, {e["id"] for e in entries})
     return db.execute("SELECT COUNT(*) FROM fortinet").fetchone()[0]
+
+
+async def backfill_ranges(db, session, in_feed, limit=40):
+    """Rows stored before ranges existed and no longer in the feed: fetch their CSAF once.
+    A file that can't be found gets an empty list, so it isn't tried again."""
+    since = (date.today() - timedelta(days=ITEM_DAYS)).isoformat()
+    todo = [r for r in db.execute("SELECT id, title, csaf FROM fortinet WHERE ranges IS NULL AND published >= ?"
+                                  " ORDER BY published DESC", (since,)) if r["id"] not in in_feed][:limit]
+    done = []
+    for r in todo:
+        url = r["csaf"] or csaf_url(r["id"], r["title"])
+        ranges = []
+        try:
+            async with session.get(url, timeout=ClientTimeout(total=30)) as resp:
+                if resp.status == 200:
+                    ranges = parse_ranges(await resp.json(content_type=None))
+                elif resp.status != 404:
+                    continue  # try again next run
+        except Exception:
+            continue
+        done.append((json.dumps(ranges), url, r["id"]))
+        await asyncio.sleep(0.3)
+    if done:
+        with batch(db):
+            db.executemany("UPDATE fortinet SET ranges=?, csaf=? WHERE id=?", done)
 
 
 def info(r):
@@ -182,7 +271,8 @@ def info(r):
             "revised": r["revised"], "cvss": r["cvss"], "products": products,
             "yours": [p for p in products if watched(p)], "exploited": bool(r["exploited"]),
             "summary": r["summary"], "fixes": json.loads(r["fixes"] or "[]"),
-            "workaround": r["workaround"], "kind": r["kind"]}
+            "workaround": r["workaround"], "kind": r["kind"],
+            "ranges": json.loads(r["ranges"] or "[]") if "ranges" in r.keys() else []}
 
 
 def relevant(r):

@@ -1,0 +1,414 @@
+{
+ "document": {
+  "title": "Improper control of generation of code in GUI",
+  "tracking": {
+   "id": "FG-IR-26-227",
+   "initial_release_date": "2026-11-10T00:00:00",
+   "current_release_date": "2026-11-10T00:00:00"
+  }
+ },
+ "product_tree": {
+  "branches": [
+   {
+    "category": "vendor",
+    "name": "Fortinet PSIRT",
+    "branches": [
+     {
+      "category": "product",
+      "name": "FortiAnalyzer",
+      "branches": [
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer/>=8.0.0|<=8.0.1",
+        "product": {
+         "product_id": "FortiAnalyzer >=8.0.0|<=8.0.1",
+         "name": "FortiAnalyzer"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer/>=7.6.0|<=7.6.7",
+        "product": {
+         "product_id": "FortiAnalyzer >=7.6.0|<=7.6.7",
+         "name": "FortiAnalyzer"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer/>=7.4.0|<=7.4.11",
+        "product": {
+         "product_id": "FortiAnalyzer >=7.4.0|<=7.4.11",
+         "name": "FortiAnalyzer"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer/>=7.2.0|<=7.2.12",
+        "product": {
+         "product_id": "FortiAnalyzer >=7.2.0|<=7.2.12",
+         "name": "FortiAnalyzer"
+        }
+       }
+      ]
+     },
+     {
+      "category": "product",
+      "name": "FortiAnalyzer Cloud",
+      "branches": [
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer Cloud/>=8.0.0|<=8.0.1",
+        "product": {
+         "product_id": "FortiAnalyzer Cloud >=8.0.0|<=8.0.1",
+         "name": "FortiAnalyzer Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer Cloud/>=7.6.0|<=7.6.7",
+        "product": {
+         "product_id": "FortiAnalyzer Cloud >=7.6.0|<=7.6.7",
+         "name": "FortiAnalyzer Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer Cloud/>=7.4.1|<=7.4.11",
+        "product": {
+         "product_id": "FortiAnalyzer Cloud >=7.4.1|<=7.4.11",
+         "name": "FortiAnalyzer Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer Cloud/>=7.2.1|<=7.2.12",
+        "product": {
+         "product_id": "FortiAnalyzer Cloud >=7.2.1|<=7.2.12",
+         "name": "FortiAnalyzer Cloud"
+        }
+       }
+      ]
+     },
+     {
+      "category": "product",
+      "name": "FortiManager",
+      "branches": [
+       {
+        "category": "product_version_range",
+        "name": "FortiManager/>=8.0.0|<=8.0.1",
+        "product": {
+         "product_id": "FortiManager >=8.0.0|<=8.0.1",
+         "name": "FortiManager"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager/>=7.6.0|<=7.6.7",
+        "product": {
+         "product_id": "FortiManager >=7.6.0|<=7.6.7",
+         "name": "FortiManager"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager/>=7.4.0|<=7.4.11",
+        "product": {
+         "product_id": "FortiManager >=7.4.0|<=7.4.11",
+         "name": "FortiManager"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager/>=7.2.0|<=7.2.12",
+        "product": {
+         "product_id": "FortiManager >=7.2.0|<=7.2.12",
+         "name": "FortiManager"
+        }
+       }
+      ]
+     },
+     {
+      "category": "product",
+      "name": "FortiManager Cloud",
+      "branches": [
+       {
+        "category": "product_version_range",
+        "name": "FortiManager Cloud/>=8.0.0|<=8.0.1",
+        "product": {
+         "product_id": "FortiManager Cloud >=8.0.0|<=8.0.1",
+         "name": "FortiManager Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager Cloud/>=7.6.0|<=7.6.7",
+        "product": {
+         "product_id": "FortiManager Cloud >=7.6.0|<=7.6.7",
+         "name": "FortiManager Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager Cloud/>=7.4.1|<=7.4.11",
+        "product": {
+         "product_id": "FortiManager Cloud >=7.4.1|<=7.4.11",
+         "name": "FortiManager Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager Cloud/>=7.2.1|<=7.2.12",
+        "product": {
+         "product_id": "FortiManager Cloud >=7.2.1|<=7.2.12",
+         "name": "FortiManager Cloud"
+        }
+       }
+      ]
+     },
+     {
+      "category": "product",
+      "name": "FortiSASE-Sovereign",
+      "branches": [
+       {
+        "category": "product_version_range",
+        "name": "FortiSASE-Sovereign/26.2 all versions",
+        "product": {
+         "product_id": "FortiSASE-Sovereign 26.2 all versions",
+         "name": "FortiSASE-Sovereign"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiSASE-Sovereign/25.4 all versions",
+        "product": {
+         "product_id": "FortiSASE-Sovereign 25.4 all versions",
+         "name": "FortiSASE-Sovereign"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiSASE-Sovereign/25.3 all versions",
+        "product": {
+         "product_id": "FortiSASE-Sovereign 25.3 all versions",
+         "name": "FortiSASE-Sovereign"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiSASE-Sovereign/25 all versions",
+        "product": {
+         "product_id": "FortiSASE-Sovereign 25 all versions",
+         "name": "FortiSASE-Sovereign"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "vulnerabilities": [
+  {
+   "cve": "CVE-2026-126182",
+   "cwe": {
+    "id": "CWE-94",
+    "name": "Improper Control of Generation of Code ('Code Injection')"
+   },
+   "title": "FortiManager - HIGH - FG-IR-26-227",
+   "scores": [
+    {
+     "products": [
+      "FortiManager"
+     ],
+     "cvss_v3": {
+      "version": "3.1",
+      "baseScore": 7.2,
+      "baseSeverity": "HIGH",
+      "temporalScore": 7.0,
+      "vectorString": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H/E:F/RL:O/RC:C"
+     }
+    }
+   ],
+   "notes": [
+    {
+     "category": "summary",
+     "title": "Summary",
+     "text": "multiple post-authentication command injection\n\n"
+    },
+    {
+     "category": "general",
+     "title": "Additional info",
+     "text": "The vulnerability can be exploited via the JSON API if enabled (Disabled by default)\nIf enabled on a profile, it can be disabled it via the following configuration to reduce the attack surface:\n\nconfig system admin profile\n  edit <profile name>\n    set rpc-permit none\nend"
+    }
+   ],
+   "product_status": {
+    "known_affected": [
+     "FortiManager >=8.0.0|<=8.0.1",
+     "FortiManager >=7.6.0|<=7.6.7",
+     "FortiManager >=7.4.0|<=7.4.11",
+     "FortiManager >=7.2.0|<=7.2.12"
+    ],
+    "known_not_affected": [
+     "FortiManager-8.0.2",
+     "FortiManager-7.6.8",
+     "FortiManager-7.4.12",
+     "FortiManager-7.2.13"
+    ]
+   },
+   "threats": [
+    {
+     "category": "impact",
+     "details": "Execute unauthorized code or commands"
+    }
+   ],
+   "remediations": [
+    {
+     "details": "FortiManager 8.0: Upgrade to 8.0.2 or above\nFortiManager 7.6: Upgrade to 7.6.8 or above\nFortiManager 7.4: Upgrade to 7.4.12 or above\nFortiManager 7.2: Upgrade to 7.2.13 or above",
+     "category": "vendor_fix",
+     "product_ids": [
+      "FortiManager"
+     ]
+    }
+   ],
+   "references": [
+    {
+     "url": "https://fortiguard.fortinet.com/psirt/FG-IR-26-227",
+     "summary": "An Improper Control of Generation of Code ('Code Injection') vulnerability [CWE-94] and a Buffer Copy without Checking Size of Input ('Classic Buffer Overflow') vulnerability [CWE-120] in FortiManager, FortiAnalyzer, FortiManager Cloud, and FortiAnalyzer Cloud may allow a remote authenticated attacker to execute unauthorized code or commands via crafted HTTP requests.\n"
+    }
+   ]
+  },
+  {
+   "cve": "CVE-2026-126182",
+   "cwe": {
+    "id": "CWE-94",
+    "name": "Improper Control of Generation of Code ('Code Injection')"
+   },
+   "title": "FortiManager Cloud - HIGH - FG-IR-26-227",
+   "scores": [
+    {
+     "products": [
+      "FortiManager Cloud"
+     ],
+     "cvss_v3": {
+      "version": "3.1",
+      "baseScore": 7.2,
+      "baseSeverity": "HIGH",
+      "temporalScore": 7.0,
+      "vectorString": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H/E:F/RL:O/RC:C"
+     }
+    }
+   ],
+   "notes": [
+    {
+     "category": "summary",
+     "title": "Summary",
+     "text": "multiple post-authentication command injection\n\n"
+    },
+    {
+     "category": "general",
+     "title": "Additional info",
+     "text": "The vulnerability can be exploited via the JSON API if enabled (Disabled by default)\nIf enabled on a profile, it can be disabled it via the following configuration to reduce the attack surface:\n\nconfig system admin profile\n  edit <profile name>\n    set rpc-permit none\nend"
+    }
+   ],
+   "product_status": {
+    "known_affected": [
+     "FortiManager Cloud >=8.0.0|<=8.0.1",
+     "FortiManager Cloud >=7.6.0|<=7.6.7",
+     "FortiManager Cloud >=7.4.1|<=7.4.11",
+     "FortiManager Cloud >=7.2.1|<=7.2.12"
+    ],
+    "known_not_affected": [
+     "FortiManager Cloud-8.0.2",
+     "FortiManager Cloud-7.6.8",
+     "FortiManager Cloud-7.4.12",
+     "FortiManager Cloud-7.2.13"
+    ]
+   },
+   "threats": [
+    {
+     "category": "impact",
+     "details": "Execute unauthorized code or commands"
+    }
+   ],
+   "remediations": [
+    {
+     "details": "FortiManager Cloud 8.0: Upgrade to 8.0.2 or above\nFortiManager Cloud 7.6: Upgrade to 7.6.8 or above\nFortiManager Cloud 7.4: Upgrade to 7.4.12 or above\nFortiManager Cloud 7.2: Upgrade to 7.2.13 or above",
+     "category": "vendor_fix",
+     "product_ids": [
+      "FortiManager Cloud"
+     ]
+    }
+   ],
+   "references": [
+    {
+     "url": "https://fortiguard.fortinet.com/psirt/FG-IR-26-227",
+     "summary": "An Improper Control of Generation of Code ('Code Injection') vulnerability [CWE-94] and a Buffer Copy without Checking Size of Input ('Classic Buffer Overflow') vulnerability [CWE-120] in FortiManager, FortiAnalyzer, FortiManager Cloud, and FortiAnalyzer Cloud may allow a remote authenticated attacker to execute unauthorized code or commands via crafted HTTP requests.\n"
+    }
+   ]
+  },
+  {
+   "cve": "CVE-2026-126182",
+   "cwe": {
+    "id": "CWE-94",
+    "name": "Improper Control of Generation of Code ('Code Injection')"
+   },
+   "title": "FortiSASE-Sovereign - HIGH - FG-IR-26-227",
+   "scores": [
+    {
+     "products": [
+      "FortiSASE-Sovereign"
+     ],
+     "cvss_v3": {
+      "version": "3.1",
+      "baseScore": 7.2,
+      "baseSeverity": "HIGH",
+      "temporalScore": 7.0,
+      "vectorString": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H/E:F/RL:O/RC:C"
+     }
+    }
+   ],
+   "notes": [
+    {
+     "category": "summary",
+     "title": "Summary",
+     "text": "multiple post-authentication command injection\n\n"
+    },
+    {
+     "category": "general",
+     "title": "Additional info",
+     "text": "The vulnerability can be exploited via the JSON API if enabled (Disabled by default)\nIf enabled on a profile, it can be disabled it via the following configuration to reduce the attack surface:\n\nconfig system admin profile\n  edit <profile name>\n    set rpc-permit none\nend"
+    }
+   ],
+   "product_status": {
+    "known_affected": [
+     "FortiSASE-Sovereign 26.2 all versions",
+     "FortiSASE-Sovereign 25.4 all versions",
+     "FortiSASE-Sovereign 25.3 all versions",
+     "FortiSASE-Sovereign 25 all versions"
+    ],
+    "known_not_affected": []
+   },
+   "threats": [
+    {
+     "category": "impact",
+     "details": "Execute unauthorized code or commands"
+    }
+   ],
+   "remediations": [
+    {
+     "details": "FortiSASE-Sovereign 26.2: Fortinet remediated this issue in 26.2 (not released) and hence customers do not need to perform any action.\nFortiSASE-Sovereign 25.4: Migrate to a fixed release\nFortiSASE-Sovereign 25.3: Migrate to a fixed release\nFortiSASE-Sovereign 25: Migrate to a fixed release",
+     "category": "vendor_fix",
+     "product_ids": [
+      "FortiSASE-Sovereign"
+     ]
+    }
+   ],
+   "references": [
+    {
+     "url": "https://fortiguard.fortinet.com/psirt/FG-IR-26-227",
+     "summary": "An Improper Control of Generation of Code ('Code Injection') vulnerability [CWE-94] and a Buffer Copy without Checking Size of Input ('Classic Buffer Overflow') vulnerability [CWE-120] in FortiManager, FortiAnalyzer, FortiManager Cloud, and FortiAnalyzer Cloud may allow a remote authenticated attacker to execute unauthorized code or commands via crafted HTTP requests.\n"
+    }
+   ]
+  }
+ ]
+}

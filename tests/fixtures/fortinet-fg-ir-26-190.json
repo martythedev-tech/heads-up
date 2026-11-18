@@ -1,0 +1,322 @@
+{
+ "document": {
+  "title": "Arbitrary file write and delete in JSON API",
+  "tracking": {
+   "id": "FG-IR-26-190",
+   "initial_release_date": "2026-11-10T00:00:00",
+   "current_release_date": "2026-11-10T00:00:00"
+  }
+ },
+ "product_tree": {
+  "branches": [
+   {
+    "category": "vendor",
+    "name": "Fortinet PSIRT",
+    "branches": [
+     {
+      "category": "product",
+      "name": "FortiAnalyzer",
+      "branches": [
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer/ 8.0 all versions",
+        "product": {
+         "product_id": "FortiAnalyzer/ 8.0 all versions",
+         "name": "FortiAnalyzer"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer/>=7.6.0|<=7.6.4",
+        "product": {
+         "product_id": "FortiAnalyzer >=7.6.0|<=7.6.4",
+         "name": "FortiAnalyzer"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer/>=7.4.0|<=7.4.7",
+        "product": {
+         "product_id": "FortiAnalyzer >=7.4.0|<=7.4.7",
+         "name": "FortiAnalyzer"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiAnalyzer/>=7.2.0|<=7.2.11",
+        "product": {
+         "product_id": "FortiAnalyzer >=7.2.0|<=7.2.11",
+         "name": "FortiAnalyzer"
+        }
+       }
+      ]
+     },
+     {
+      "category": "product",
+      "name": "FortiManager",
+      "branches": [
+       {
+        "category": "product_version_range",
+        "name": "FortiManager/ 8.0 all versions",
+        "product": {
+         "product_id": "FortiManager/ 8.0 all versions",
+         "name": "FortiManager"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager/>=7.6.0|<=7.6.4",
+        "product": {
+         "product_id": "FortiManager >=7.6.0|<=7.6.4",
+         "name": "FortiManager"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager/>=7.4.0|<=7.4.7",
+        "product": {
+         "product_id": "FortiManager >=7.4.0|<=7.4.7",
+         "name": "FortiManager"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager/>=7.2.0|<=7.2.11",
+        "product": {
+         "product_id": "FortiManager >=7.2.0|<=7.2.11",
+         "name": "FortiManager"
+        }
+       }
+      ]
+     },
+     {
+      "category": "product",
+      "name": "FortiManager Cloud",
+      "branches": [
+       {
+        "category": "product_version_range",
+        "name": "FortiManager Cloud/ 8.0 all versions",
+        "product": {
+         "product_id": "FortiManager Cloud/ 8.0 all versions",
+         "name": "FortiManager Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager Cloud/>=7.6.0|<=7.6.4",
+        "product": {
+         "product_id": "FortiManager Cloud >=7.6.0|<=7.6.4",
+         "name": "FortiManager Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager Cloud/>=7.4.1|<=7.4.7",
+        "product": {
+         "product_id": "FortiManager Cloud >=7.4.1|<=7.4.7",
+         "name": "FortiManager Cloud"
+        }
+       },
+       {
+        "category": "product_version_range",
+        "name": "FortiManager Cloud/>=7.2.1|<=7.2.10",
+        "product": {
+         "product_id": "FortiManager Cloud >=7.2.1|<=7.2.10",
+         "name": "FortiManager Cloud"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "vulnerabilities": [
+  {
+   "cve": "CVE-2025-61625",
+   "cwe": {
+    "id": "CWE-22",
+    "name": "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"
+   },
+   "title": "FortiAnalyzer - HIGH - FG-IR-26-190",
+   "scores": [
+    {
+     "products": [
+      "FortiAnalyzer"
+     ],
+     "cvss_v3": {
+      "version": "3.1",
+      "baseScore": 7.3,
+      "baseSeverity": "HIGH",
+      "vectorString": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:H/E:P/RL:O/RC:C"
+     }
+    }
+   ],
+   "notes": [
+    {
+     "category": "summary",
+     "title": "Summary",
+     "text": "Arbitrary file write and delete in FortiManager and FortiAnalyzer JSON API\n\n"
+    }
+   ],
+   "product_status": {
+    "known_affected": [
+     "FortiAnalyzer >=7.6.0|<=7.6.4",
+     "FortiAnalyzer >=7.4.0|<=7.4.7",
+     "FortiAnalyzer >=7.2.0|<=7.2.11"
+    ],
+    "known_not_affected": [
+     "FortiAnalyzer/ 8.0 all versions",
+     "FortiAnalyzer-7.6.5",
+     "FortiAnalyzer-7.4.8",
+     "FortiAnalyzer-7.2.12"
+    ]
+   },
+   "threats": [
+    {
+     "category": "impact",
+     "details": "Execute unauthorized code or commands"
+    }
+   ],
+   "remediations": [
+    {
+     "details": "FortiAnalyzer 8.0: Not Applicable\nFortiAnalyzer 7.6: Upgrade to 7.6.5 or above\nFortiAnalyzer 7.4: Upgrade to 7.4.8 or above\nFortiAnalyzer 7.2: Upgrade to 7.2.12 or above",
+     "category": "vendor_fix",
+     "product_ids": [
+      "FortiAnalyzer"
+     ]
+    }
+   ],
+   "references": [
+    {
+     "url": "https://fortiguard.fortinet.com/psirt/FG-IR-26-190",
+     "summary": "An improper limitation of a pathname to a restricted directory ('Path Traversal') vulnerability [CWE-22] in FortiManager and FortiAnalyzer API may allow an authenticated attacker whose profile only has read permission to write and delete files from the underlying filesystem via crafted HTTP or HTTPs requests."
+    }
+   ]
+  },
+  {
+   "cve": "CVE-2025-61625",
+   "cwe": {
+    "id": "CWE-22",
+    "name": "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"
+   },
+   "title": "FortiManager - HIGH - FG-IR-26-190",
+   "scores": [
+    {
+     "products": [
+      "FortiManager"
+     ],
+     "cvss_v3": {
+      "version": "3.1",
+      "baseScore": 7.3,
+      "baseSeverity": "HIGH",
+      "vectorString": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:H/E:P/RL:O/RC:C"
+     }
+    }
+   ],
+   "notes": [
+    {
+     "category": "summary",
+     "title": "Summary",
+     "text": "Arbitrary file write and delete in FortiManager and FortiAnalyzer JSON API\n\n"
+    }
+   ],
+   "product_status": {
+    "known_affected": [
+     "FortiManager >=7.6.0|<=7.6.4",
+     "FortiManager >=7.4.0|<=7.4.7",
+     "FortiManager >=7.2.0|<=7.2.11"
+    ],
+    "known_not_affected": [
+     "FortiManager/ 8.0 all versions",
+     "FortiManager-7.6.5",
+     "FortiManager-7.4.8",
+     "FortiManager-7.2.12"
+    ]
+   },
+   "threats": [
+    {
+     "category": "impact",
+     "details": "Execute unauthorized code or commands"
+    }
+   ],
+   "remediations": [
+    {
+     "details": "FortiManager 8.0: Not Applicable\nFortiManager 7.6: Upgrade to 7.6.5 or above\nFortiManager 7.4: Upgrade to 7.4.8 or above\nFortiManager 7.2: Upgrade to 7.2.12 or above",
+     "category": "vendor_fix",
+     "product_ids": [
+      "FortiManager"
+     ]
+    }
+   ],
+   "references": [
+    {
+     "url": "https://fortiguard.fortinet.com/psirt/FG-IR-26-190",
+     "summary": "An improper limitation of a pathname to a restricted directory ('Path Traversal') vulnerability [CWE-22] in FortiManager and FortiAnalyzer API may allow an authenticated attacker whose profile only has read permission to write and delete files from the underlying filesystem via crafted HTTP or HTTPs requests."
+    }
+   ]
+  },
+  {
+   "cve": "CVE-2025-61625",
+   "cwe": {
+    "id": "CWE-22",
+    "name": "Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"
+   },
+   "title": "FortiManager Cloud - HIGH - FG-IR-26-190",
+   "scores": [
+    {
+     "products": [
+      "FortiManager Cloud"
+     ],
+     "cvss_v3": {
+      "version": "3.1",
+      "baseScore": 7.3,
+      "baseSeverity": "HIGH",
+      "vectorString": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:H/E:P/RL:O/RC:C"
+     }
+    }
+   ],
+   "notes": [
+    {
+     "category": "summary",
+     "title": "Summary",
+     "text": "Arbitrary file write and delete in FortiManager and FortiAnalyzer JSON API\n\n"
+    }
+   ],
+   "product_status": {
+    "known_affected": [
+     "FortiManager Cloud >=7.6.0|<=7.6.4",
+     "FortiManager Cloud >=7.4.1|<=7.4.7",
+     "FortiManager Cloud >=7.2.1|<=7.2.10"
+    ],
+    "known_not_affected": [
+     "FortiManager Cloud/ 8.0 all versions",
+     "FortiManager Cloud-7.6.5",
+     "FortiManager Cloud-7.4.8",
+     "FortiManager Cloud-7.2.11"
+    ]
+   },
+   "threats": [
+    {
+     "category": "impact",
+     "details": "Execute unauthorized code or commands"
+    }
+   ],
+   "remediations": [
+    {
+     "details": "FortiManager Cloud 8.0: Not Applicable\nFortiManager Cloud 7.6: Upgrade to 7.6.5 or above\nFortiManager Cloud 7.4: Upgrade to 7.4.8 or above\nFortiManager Cloud 7.2: Upgrade to 7.2.11 or above",
+     "category": "vendor_fix",
+     "product_ids": [
+      "FortiManager Cloud"
+     ]
+    }
+   ],
+   "references": [
+    {
+     "url": "https://fortiguard.fortinet.com/psirt/FG-IR-26-190",
+     "summary": "An improper limitation of a pathname to a restricted directory ('Path Traversal') vulnerability [CWE-22] in FortiManager and FortiAnalyzer API may allow an authenticated attacker whose profile only has read permission to write and delete files from the underlying filesystem via crafted HTTP or HTTPs requests."
+    }
+   ]
+  }
+ ]
+}

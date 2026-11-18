@@ -273,7 +273,9 @@ def describe(v, releases, today, entries=None):
     # the versions you run against the fixed versions Fortinet and TrueNAS publish
     fixes = [f for page in fn_pages.values() for f in VS.fortinet_fixes(page.get("fixes"))]
     fixes += [f for page in tn_pages.values() for f in VS.truenas_fixes(page.get("fixedIn"))]
-    vcheck = VS.check([entries[n] for n in ours if n in (entries or {})], fixes) if ours and fixes else None
+    ranges = VS.fortinet_ranges([r for page in fn_pages.values() for r in page.get("ranges") or []])
+    vcheck = (VS.check([entries[n] for n in ours if n in (entries or {})], fixes, ranges)
+              if ours and (fixes or ranges) else None)
     triage = p.get("triage")
     manual = (triage or {}).get("state") not in (None, "untriaged")
     # a status someone set wins over the version check

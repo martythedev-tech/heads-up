@@ -109,6 +109,71 @@ def test_exact_and_whole_line_together():
     assert not r["fixed"] and states(r) == [("7.6.9", "fixed", "7.6.8"), ("8.0.x", "line", "8.0.2")]
 
 
+# --- Fortinet's version ranges (when the fix lines leave a product out) -----------
+
+FG227 = json.loads((helpers.FIXTURES / "fortinet-fg-ir-26-227.json").read_text())
+FG190 = json.loads((helpers.FIXTURES / "fortinet-fg-ir-26-190.json").read_text())
+
+
+def faz_227(version):
+    p = app.FN.parse_csaf(FG227)
+    return VS.check([{**FAZ, "version": version}], VS.fortinet_fixes(p["fixes"]), VS.fortinet_ranges(p["ranges"]))
+
+
+def test_ranges_parse_from_the_real_file():
+    r = app.FN.parse_ranges(FG227)
+    faz = [x for x in r if x["product"] == "FortiAnalyzer"]
+    assert {(x["min"], x["max"]) for x in faz} >= {("7.4.0", "7.4.11"), ("7.6.0", "7.6.7"), ("8.0.0", "8.0.1")}, faz
+    assert all(x["affected"] for x in faz)   # no status in the file, affected on the page
+    # FG-IR-26-190: "8.0 all versions" is listed as not affected
+    eighty = [x for x in app.FN.parse_ranges(FG190) if x["product"] == "FortiAnalyzer" and x["line"] == [8, 0]]
+    assert eighty and eighty[0]["all"] and not eighty[0]["affected"], eighty
+
+
+def test_fg_ir_26_227_fortianalyzer_decided_by_ranges():
+    # the file's fix lines only name FortiManager, so FortiAnalyzer is decided by its ranges
+    assert app.FN.parse_csaf(FG227)["fixes"] == []
+    r = faz_227("7.4.12")
+    assert r["fixed"] and states(r) == [("7.4.12", "fixed", None)] and r["notes"][0]["upto"] == "7.4.11", r
+    assert states(faz_227("7.4.10")) == [("7.4.10", "affected", None)]
+    assert not faz_227("7.4.10")["fixed"]
+    assert states(faz_227("7.4.x")) == [("7.4.x", "rangeline", None)]
+    assert states(faz_227("7.0.5")) == [("7.0.5", "notaffected", None)]
+    assert faz_227("7.0.5")["fixed"]
+
+
+def test_whole_line_ranges():
+    ranges = VS.fortinet_ranges([
+        {"product": "FortiAnalyzer", "line": [7, 2], "min": None, "max": None, "all": True, "affected": True},
+        {"product": "FortiAnalyzer", "line": [8, 0], "min": None, "max": None, "all": True, "affected": False}])
+    assert states(VS.check([{**FAZ, "version": "7.2.9"}], [], ranges)) == [("7.2.9", "affectedline", None)]
+    assert VS.check([{**FAZ, "version": "8.0.1"}], [], ranges)["fixed"]
+
+
+def test_fix_lines_win_over_ranges():
+    ranges = VS.fortinet_ranges([{"product": "FortiAnalyzer", "line": [7, 6], "min": "7.6.0", "max": "7.6.9",
+                                  "all": False, "affected": True}])
+    r = VS.check([{**FAZ, "version": "7.6.8"}], VS.fortinet_fixes(FIXES), ranges)
+    assert states(r) == [("7.6.8", "fixed", "7.6.8")]
+
+
+def test_csaf_url_from_title():
+    assert app.FN.csaf_url("FG-IR-26-227", "Improper control of generation of code in GUI") == \
+        "https://filestore.fortinet.com/fortiguard/psirt/csaf_improper-control-of-generation-of-code-in-gui_fg-ir-26-227.json"
+
+
+def test_old_table_gets_the_new_columns():
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE fortinet (id TEXT PRIMARY KEY, title TEXT, link TEXT, feed_date TEXT, published TEXT,"
+               " revised TEXT, cvss REAL, products TEXT, cves TEXT, exploited INTEGER, summary TEXT, fixes TEXT,"
+               " workaround TEXT, kind TEXT)")
+    app.FN.migrate(db)
+    cols = [r[1] for r in db.execute("PRAGMA table_info(fortinet)")]
+    assert cols[-2:] == ["ranges", "csaf"], cols
+    app.FN.migrate(db)   # twice is fine
+
+
 # --- through build_state, as the page and the webhooks see it ----------------------
 
 def fresh():
@@ -152,6 +217,20 @@ def test_no_version_keeps_the_old_behaviour():
     v = vuln(fresh(), "")
     assert v["group"] == "soon" and v["versionCheck"] is None
     assert "Fortinet fix: FortiAnalyzer 8.0: Upgrade to 8.0.2 or above." in why(v), why(v)
+
+
+def test_fg_ir_26_227_through_build_state():
+    db = fresh()
+    p = app.FN.parse_csaf(FG227)
+    db.execute("UPDATE fortinet SET fixes=?, ranges=?, products=?", (json.dumps(p["fixes"]), json.dumps(p["ranges"]),
+                                                                      json.dumps(p["products"])))
+    row = db.execute("SELECT * FROM fortinet WHERE id='FG-1'").fetchone()
+    db.execute("UPDATE items SET extra=? WHERE id='fn:FG-1'", (json.dumps(app.FN.info(row)),))
+    v = vuln(db, "7.4.12")
+    assert v["group"] == "done" and v["autoDone"], v["group"]
+    assert why(v) == "Fixed in the version you run: FortiAnalyzer 7.4.12 (affected up to 7.4.11).", why(v)
+    v = vuln(db, "7.4.9")
+    assert v["group"] != "done" and "You run FortiAnalyzer 7.4.9: affected (up to 7.4.11)" in why(v), why(v)
 
 
 def test_a_status_someone_set_wins():
