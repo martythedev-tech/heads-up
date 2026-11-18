@@ -54,8 +54,17 @@ serious (CVSS 7+, Ubuntu high/critical, a Cloudflare briefing, TrueNAS
 High/Critical) to **Patch soon**. When the only link is a TrueNAS impact
 statement rating it Low/Medium on TrueNAS, the vendor's rating wins (Patch soon
 at most); a TrueNAS "not affected" statement doesn't count as a match.
-Versions are notes only. Editing the list doesn't send webhook alerts for the
-entries it moves.
+Each entry can also hold the **versions you run**, comma-separated when boxes
+differ ("7.4.8, 7.6.3"). Fortinet's fixed versions per release line and
+TrueNAS's "Fixed in" are compared with them: when every version you run
+already has the fix, the item moves to **Done** marked FIXED IN YOURS;
+otherwise it says what to do ("You run FortiOS 7.4.8: upgrade to 7.4.9", "no
+fix on the 7.2 line, move to a fixed release"). A release line the vendor
+lists no fix for, an item that also matches a product without version data,
+or wording that doesn't parse leaves the item where it was, and a status
+someone set by hand always wins. Other sources don't publish fixed versions in
+a usable form, so for them the version is a note. Editing the list doesn't
+send webhook alerts for the entries it moves.
 
 Not yet exploited items move to **Patch soon** when they are critical, rated
 critical by Ubuntu, likely to be exploited, publicly disclosed by Microsoft,

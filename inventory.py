@@ -6,8 +6,11 @@ insensitive, against the product fields of each source (CISA/VulnCheck
 vendor and product, Microsoft product, Fortinet products, TrueNAS, Ubuntu
 packages, Cloudflare's title and topics), never against free text, so
 "Exchange" doesn't match a description that mentions "key exchange".
-Versions are kept as notes only: the feeds don't give versions in a form
-that could be compared reliably.
+The version box takes the versions you run, comma-separated ("7.4.8, 7.6.3"
+when boxes differ). Fortinet and TrueNAS advisories are checked against them
+(versions.py): an item every version you run is fixed for moves to Done.
+Other sources don't publish fixed versions in a usable form, so for them it
+stays a note.
 """
 import json
 import re
@@ -58,7 +61,7 @@ def save(db, body, user):
         raise InventoryError(f"“{name}” is already on the list")
     eid = eid or secrets.token_hex(6)
     db.execute("INSERT OR REPLACE INTO inventory VALUES(?,?,?,?,?,?,?)",
-               (eid, name, json.dumps(terms), clean(body.get("version"), 60), clean(body.get("note"), 200), user, time.time()))
+               (eid, name, json.dumps(terms), clean(body.get("version"), 120), clean(body.get("note"), 200), user, time.time()))
     return eid
 
 

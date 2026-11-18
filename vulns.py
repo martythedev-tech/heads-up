@@ -19,6 +19,8 @@ Groups:
   act    exploited, whatever its age or source (no "check whether you run it")
   soon   not exploited but serious: CVSS >= 7, Ubuntu high/critical, TrueNAS
          High/Critical, or any Cloudflare briefing
+  done   every version you run already has Fortinet's / TrueNAS's fix
+         (versions.py), unless someone set a status by hand
 """
 import re
 from datetime import datetime, timedelta, timezone
@@ -27,6 +29,7 @@ import exploits as X
 import truenas as TN
 import fortinet as FN
 import inventory as INV
+import versions as VS
 
 GROUP_TITLES = {"act": "Act now", "soon": "Patch soon", "aware": "For awareness", "done": "Done"}
 STATE_LABEL = {"untriaged": "Not checked yet", "investigating": "Investigating",
@@ -165,6 +168,7 @@ def build(items, releases, inventory=None):
             v["usnPrimary"] = True
             out.append(v)
     today = datetime.now(timezone.utc).date()
+    entries = {e["name"]: e for e in inventory or []}
     for v in out:
         parts = [v["primary"], v["zw"], *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"]]
         via = {}   # product name -> the sources it matched through
@@ -174,10 +178,10 @@ def build(items, releases, inventory=None):
                     via.setdefault(name, set()).add(i["source"])
         v["ours"] = sorted(via)
         v["oursTrueNASOnly"] = bool(via) and all(s == {"truenas"} for s in via.values())
-    return [describe(v, releases, today) for v in out]
+    return [describe(v, releases, today, entries) for v in out]
 
 
-def describe(v, releases, today):
+def describe(v, releases, today, entries=None):
     p = v["primary"]
     cves = p["cves"]
     kev_dates = sorted(c["kev"]["added"] for c in cves if c.get("kev") and c["kev"].get("added"))
@@ -265,8 +269,16 @@ def describe(v, releases, today):
         if len(words) > 2 and words[0] == words[1]:
             desc = " ".join(words[1:])
 
+    ours = v.get("ours") or []
+    # the versions you run against the fixed versions Fortinet and TrueNAS publish
+    fixes = [f for page in fn_pages.values() for f in VS.fortinet_fixes(page.get("fixes"))]
+    fixes += [f for page in tn_pages.values() for f in VS.truenas_fixes(page.get("fixedIn"))]
+    vcheck = VS.check([entries[n] for n in ours if n in (entries or {})], fixes) if ours and fixes else None
     triage = p.get("triage")
-    done = (triage or {}).get("state") in ("patched", "not_affected")
+    manual = (triage or {}).get("state") not in (None, "untriaged")
+    # a status someone set wins over the version check
+    auto_fixed = bool(vcheck) and vcheck["fixed"] and not manual
+    done = (triage or {}).get("state") in ("patched", "not_affected") or auto_fixed
     recent_kev = exploited and kev_last >= (today - timedelta(days=14)).isoformat()
     cf_urgent = bool(zw) and zw.get("category") == "Needs attention"
     prio = p.get("category") if v["usnPrimary"] else None
@@ -277,7 +289,6 @@ def describe(v, releases, today):
     old_cve = bool(years) and max(years) < today.year - 1
     vc_strong = (any((c.get("vulncheck") or {}).get("canary") for c in cves)
                  or exploit in ("metasploit", "exploitdb") or (cvss or 0) >= 9 or bool(zw) or bool(ms_info))
-    ours = v.get("ours") or []
     # Known only through a TrueNAS impact statement that rates it Low/Medium on
     # TrueNAS: the vendor's rating wins, so at most Patch soon.
     tn_softened = bool(ours) and v.get("oursTrueNASOnly") and bool(tn) and tn.get("level") in ("low", "medium")
@@ -308,7 +319,9 @@ def describe(v, releases, today):
     why = []
     if ours and not done:
         why += [["You run ", False], [", ".join(ours), True], [". ", False]]
-    if done:
+    if auto_fixed:
+        why += VS.why_done(vcheck)
+    elif done:
         why += [["Marked ", False], [STATE_LABEL[triage["state"]], True], [f" by {triage['by']}.", False]]
     elif exploited:
         why += [["Attackers are using this", True], [f", confirmed by {exploited_by} on {short_date(kev_last)}.", False]]
@@ -364,7 +377,7 @@ def describe(v, releases, today):
     if not done and fn and fn_mine:
         if p["source"] != "fortinet":
             why += [[" Affects your ", False], [", ".join(fn["yours"]), True], [f" (Fortinet {fn['id']}).", False]]
-        if fn.get("fixes"):
+        if fn.get("fixes") and not vcheck:
             why += [[" Fortinet fix: ", False], [fn["fixes"][0], True], [".", False]]
         if "virtual patch" in (fn.get("workaround") or "").lower():
             why += [[" An IPS virtual patch is available.", False]]
@@ -373,8 +386,10 @@ def describe(v, releases, today):
     if not done and tn and p["source"] != "truenas" and not tn_softened:
         why += [[" TrueNAS itself is not affected." if tn.get("level") == "none"
                  else f" TrueNAS rates the impact {tn.get('rating') or 'unrated'}.", False]]
-    if not done and tn and tn.get("fixedIn"):
+    if not done and tn and tn.get("fixedIn") and not vcheck:
         why += [[" TrueNAS fix: ", False], [tn["fixedIn"], True], [".", False]]
+    if not done and vcheck:
+        why += VS.why(vcheck)
     if not done and ms_info:
         why += [[f" Microsoft fix out ({ms_info[0]['releaseLabel']} updates).", False]]
     if not done and not v["usnPrimary"]:
@@ -404,7 +419,7 @@ def describe(v, releases, today):
         "microsoft": ms_info[0] if ms_info else None,
         "latest": _max([i.get("updated") or i.get("published") for i in
                         [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"]] if i]) or "",
-        "triage": triage,
+        "triage": triage, "versionCheck": vcheck, "autoDone": auto_fixed,
     }
 
 
