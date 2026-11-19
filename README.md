@@ -58,7 +58,8 @@ Each entry can also hold the **versions you run**, comma-separated when boxes
 differ ("7.4.8, 7.6.3"), or a whole release line ("7.4.x") when several patch
 levels are in use; a whole line is never counted as fixed, it says which
 version to check for. Fortinet's fixed versions per release line and
-TrueNAS's "Fixed in" are compared with them (when Fortinet's fix lines leave
+TrueNAS's "Fixed in" (or, on impact statements without that field, a
+release the text says has the fix, such as "fixed in 25.10.4") are compared with them (when Fortinet's fix lines leave
 a product out, which its files sometimes do, the affected version ranges in
 the same advisory decide: inside a range is affected, newer than every range
 on that line is fixed, a line with no affected range isn't affected): when every version you run

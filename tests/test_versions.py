@@ -92,6 +92,28 @@ def test_truenas_fixed_in():
     assert states(VS.check([{**tn, "version": "25.04.2"}], f)) == [("25.04.2", "unlisted", None)]
 
 
+def test_truenas_fix_named_in_impact_statement_text():
+    import truenas as TN
+    # phrasings from real impact statements (CIFSwitch, Copy Fail, Linux TCP UAF, Dirty Frag)
+    assert TN.text_fixed_in("25.10.x series (fixed in 25.10.4)\nAttack Surface") == "TrueNAS 25.10.4"
+    assert TN.text_fixed_in("TrueNAS fix: Scheduled for inclusion in TrueNAS 25.10.4.") == "TrueNAS 25.10.4"
+    assert TN.text_fixed_in("The upstream kernel patch is included in TrueNAS 25.10.3.1.") == "TrueNAS 25.10.3.1"
+    assert TN.text_fixed_in("The fix is incorporated in TrueNAS SCALE 25.10.8. And the fix is already "
+                            "present in 25.10.8") == "TrueNAS 25.10.8"
+    # not a fixed release: kernel versions, the dev build, affected ranges, plain mentions
+    assert TN.text_fixed_in("25.10.4\n6.12.x\nAffected — fix in 6.12.94") is None
+    assert TN.text_fixed_in("Patched Releases TrueNAS dev / 25.10.4+ (6.18.36)") is None
+    assert TN.text_fixed_in("fix not available in 25.10.3.1 and earlier") is None
+    assert TN.text_fixed_in("Testing was conducted on TrueNAS 25.10.3.1 using a proof-of-concept") is None
+    # an impact statement stays an impact statement, but its fixed release is compared
+    p = TN.parse("<p>Severity: High (CVE), Medium (TrueNAS Impact)</p><h2>Fix status</h2>"
+                 "<p>The upstream kernel patch is included in TrueNAS 25.10.3.1.</p>")
+    assert p["kind"] == "impact" and p["fixed_in"] == "TrueNAS 25.10.3.1"
+    tn = {"name": "TrueNAS", "terms": ["TrueNAS"]}
+    assert VS.check([{**tn, "version": "25.10.7"}], VS.truenas_fixes(p["fixed_in"]))["fixed"]
+    assert TN.parse("<p>Fixed in: TrueNAS SCALE 25.10.8</p>")["kind"] == "advisory"
+
+
 def test_whole_line_is_never_fixed_and_says_what_to_check():
     assert VS.parse("7.4.x, 7.6.X, 7.2.*") == ["7.4.x", "7.6.x", "7.2.x"]
     assert states(run("7.6.x")) == [("7.6.x", "line", "7.6.8")]

@@ -32,6 +32,13 @@ LEVELS = ["none", "low", "medium", "high", "critical"]
 CVE_RE = re.compile(r"CVE-(\d{4})-(\d{4,})")
 FIELD_RE = re.compile(r"^(Status|CVE|CVEs|Affected products?|Severity \(TrueNAS-adjusted\)|Severity|"
                       r"Upstream severity|Fixed in|Fixed versions?|Workaround|Mitigation)\s*:\s*(.+)$", re.I)
+# Impact statements have no "Fixed in" field but often name the release in the text:
+# "(fixed in 25.10.4)", "The fix is included in TrueNAS SCALE 25.10.8", "Scheduled for inclusion in
+# TrueNAS 25.10.4". Only TrueNAS release numbers (YY.04 / YY.10) count, never kernel versions
+# ("fix in 6.12.94"), and never "25.10.4+" (that's the dev build) or "25.10.3.1 and earlier".
+TN_VER = r"2\d\.(?:04|10)(?:\.\d+)+"
+TEXT_FIX_RE = re.compile(r"\b(?:fix(?:ed)?|patch(?:ed)?)\b[^.\n]{0,60}?\bin\s+(?:TrueNAS\s+(?:SCALE\s+|CE\s+)?)?"
+                         rf"({TN_VER})\b(?!\+|\.\d)(?!\s+and\s+earlier)", re.I)
 TODO_HEADINGS = re.compile(r"(recommend|remediat|mitigat|what (should|to do)|action|workaround|protect)", re.I)
 
 
@@ -75,6 +82,12 @@ def title_cves(title):
     return out
 
 
+def text_fixed_in(whole):
+    """Fixed releases named in the page text -> 'TrueNAS 25.10.4' (None when none)."""
+    found = list(dict.fromkeys(m.group(1) for m in TEXT_FIX_RE.finditer(whole or "")))
+    return ", ".join(f"TrueNAS {v}" for v in found) or None
+
+
 def parse(desc):
     """Pull the rating fields, summary and advice out of one page's HTML."""
     desc = re.sub(r"(?is)<script.*?</script>|<svg.*?</svg>", "", desc or "")
@@ -101,6 +114,8 @@ def parse(desc):
         m2 = re.search(r"([^,]+?)\s*\(TrueNAS Impact\)", fields["severity"])
         rating = rating or (m2.group(1).strip() if m2 else None)
         out["upstream"] = out["upstream"] or re.sub(r"\s*\(CVE\)", "", fields["severity"].split(",")[0]).strip()
+    out["kind"] = "advisory" if out["fixed_in"] else "impact"
+    out["fixed_in"] = out["fixed_in"] or text_fixed_in(whole)
     out["level"] = level_of(rating)
     if rating:  # "High — CVSS 3.1 8.3 (...)" -> label "High", the rest explains it
         label, _, rest = re.sub(r"\s[—-]\s|;\s", "\x00", rating, count=1).partition("\x00")
@@ -148,8 +163,9 @@ def parse_feed(xml_text):
         title = (it.findtext("title") or "").strip()
         p = parse(it.findtext("description"))
         cves = list(dict.fromkeys(title_cves(title) + [f"CVE-{y}-{n}" for y, n in p["cves"]]))
-        # A "Fixed in" version means a bug in TrueNAS itself; the rest are impact statements.
-        kind = "advisory" if p["fixed_in"] else "impact"
+        # A "Fixed in" field means a bug in TrueNAS itself; the rest are impact statements
+        # (which may still name a fixed release in their text).
+        kind = p["kind"]
         slug = link.rstrip("/").rsplit("/", 1)[-1] or title
         rows.append((slug, title, link, published, kind, p["level"], p["impact"], p["rating"], p["upstream"],
                      p["affected"], p["fixed_in"], p["summary"], p["todo"], ",".join(cves)))
