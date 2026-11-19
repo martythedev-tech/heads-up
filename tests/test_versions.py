@@ -257,7 +257,7 @@ def test_fg_ir_26_227_through_build_state():
 
 def test_a_status_someone_set_wins():
     db = fresh()
-    db.execute("INSERT INTO triage VALUES('fn:FG-1','investigating','','camron',0)")
+    db.execute("INSERT INTO triage VALUES('fn:FG-1','investigating','','someone',0)")
     v = vuln(db, "7.6.9")
     assert v["group"] != "done" and not v["autoDone"]
     db.execute("UPDATE triage SET state='untriaged'")
