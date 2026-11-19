@@ -59,7 +59,9 @@ differ ("7.4.8, 7.6.3"), or a whole release line ("7.4.x") when several patch
 levels are in use; a whole line is never counted as fixed, it says which
 version to check for. Fortinet's fixed versions per release line and
 TrueNAS's "Fixed in" (or, on impact statements without that field, a
-release the text says has the fix, such as "fixed in 25.10.4") are compared with them (when Fortinet's fix lines leave
+release the text says has the fix, such as "fixed in 25.10.4") and VMware's vCenter/ESXi fixed versions (from the CVE records:
+"8.0 U3m", "ESXi80U3k-25595708"; type "8.0 U3m" or "8.0.3.01200" for vCenter, "8.0 U3k
+build 25595708" for ESXi) are compared with them (when Fortinet's fix lines leave
 a product out, which its files sometimes do, the affected version ranges in
 the same advisory decide: inside a range is affected, newer than every range
 on that line is fixed, a line with no affected range isn't affected): when every version you run
@@ -114,7 +116,7 @@ logged under their name.
   Tested on Ubuntu 26.04; Ubuntu 24.04 and Debian 12 or newer work the same way.
 - Outbound HTTPS from the server to radar.cloudflare.com, api.cloudflare.com,
   cisa.gov, ubuntu.com, api.osv.dev, api.first.org, services.nvd.nist.gov,
-  api.msrc.microsoft.com, security.truenas.com, filestore.fortinet.com, gitlab.com (Exploit-DB), raw.githubusercontent.com, api.github.com
+  api.msrc.microsoft.com, cveawg.mitre.org, security.truenas.com, filestore.fortinet.com, gitlab.com (Exploit-DB), raw.githubusercontent.com, api.github.com
   and (with a token) api.vulncheck.com / serve.vulncheck.com.
 - Two free ports: **9443** (the dashboard, HTTPS) and **9080** (redirects to
   HTTPS and serves the certificate to trust). Both can be changed.

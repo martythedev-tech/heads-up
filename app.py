@@ -39,11 +39,12 @@ import truenas as TN
 import fortinet as FN
 import inventory as INV
 import vulncheck as VC
+import vmware as VM
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.16.1"
+VERSION = "0.17.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -138,6 +139,7 @@ def db_open():
     FN.migrate(db)
     INV.migrate(db)
     VC.migrate(db)
+    VM.migrate(db)
     return db
 
 
@@ -565,6 +567,11 @@ class Fetcher:
             self.sync_ms_items()
         except Exception as e:
             source_err(self.db, "poc", e)
+        # VMware fixed versions from the CVE records (What we run: vCenter / ESXi versions)
+        try:
+            await VM.lookup(self.db, self.session)
+        except Exception as e:
+            log(f"VMware CVE records: {e!r}")
         # Ubuntu's priority for every CVE in a notice, via OSV (reliable, fast).
         marks = ",".join("?" * len(everything)) or "''"
         todo = [r["id"] for r in self.db.execute(
@@ -816,6 +823,8 @@ def build_state(db, inventory=None):
         use_vendor_score(cves[cve_id], info, "Microsoft")
     for cve_id, fix in MS.fix_months(db, cves).items():
         cves[cve_id]["msFix"] = fix
+    for cve_id, rs in VM.cve_ranges(db, cves).items():
+        cves[cve_id]["vmware"] = rs
     for cve_id, info in FN.cve_info(db, cves).items():
         cves[cve_id]["fortinet"] = info
         use_vendor_score(cves[cve_id], info, "Fortinet")

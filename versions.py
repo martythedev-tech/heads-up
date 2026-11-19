@@ -10,6 +10,9 @@ affected version ranges in the same file decide: inside a range is affected,
 above every range on that line is fixed, a line with no affected range isn't
 affected.
 
+VMware: vCenter and ESXi, from the affected ranges in the CVE records (vmware.py),
+e.g. "8.0 up to 8.0 U3m" or "8.0 up to ESXi80U3k-25595708".
+
 Microsoft: Windows and most Microsoft products patch by monthly cumulative
 updates, so the "version" is the month you're patched through ("2026-11" or
 "November 2026"). An item Microsoft fixed in that month or earlier is fixed.
@@ -21,6 +24,8 @@ fixed, it says which version to check for instead. Anything that can't be decide
 fix listed, wording that doesn't parse, or a product with no version entered.
 """
 import re
+
+import vmware as VM
 
 VER = re.compile(r"(?<![\d.])\d+(?:\.\d+)+(?:\.[xX*])?")
 FN_LINE = re.compile(r"^(?P<product>.+?)\s+(?P<train>\d+\.\d+)(?:\.x)?\s*:\s*(?P<text>.+)$", re.I)
@@ -128,13 +133,14 @@ def from_ranges(product, ver, ranges):
     return "notaffected", None, None
 
 
-def check(entries, fixes, ranges=(), ms=()):
+def check(entries, fixes, ranges=(), ms=(), vmw=()):
     """entries: the What we run entries this item matched, each {name, terms, version}.
     fixes: everything fortinet_fixes / truenas_fixes found for this item, all vendors together.
     ranges: Fortinet's affected version ranges (fortinet_ranges), used for a product
     the fix lines leave out.
     ms: the Microsoft releases that fixed the item's CVEs (ms_fixes), compared with a
     month in the entry's version box.
+    vmw: VMware's vCenter/ESXi affected ranges for the item's CVEs (vmware.parse_ranges).
 
     Returns None when no entry with versions has data here, else
     {"fixed": bool (every matched entry is on a fixed or unaffected version), "notes": [...]},
@@ -159,6 +165,11 @@ def check(entries, fixes, ranges=(), ms=()):
             notes.append({"product": e["name"], "version": f"patched through {month_label(month)}",
                           "state": "msfixed" if month >= need["month"] else "msupdate", "fix": need["label"],
                           "upto": None, "vendor": "Microsoft"})
+            continue
+        vm_note = VM.check(e, vmw) if vmw else None
+        if vm_note:
+            notes.append(vm_note)
+            checked = checked or vm_note["state"] != "noversion"
             continue
         if not mine and not mine_r:
             notes.append({"product": e["name"], "version": None, "state": "nodata", "fix": None})
@@ -197,8 +208,8 @@ def check(entries, fixes, ranges=(), ms=()):
 DONE_STATES = ("fixed", "notaffected", "msfixed")
 
 
-def _line(ver):
-    return ".".join(map(str, line_of(ver)))
+def _line(n):
+    return n.get("line") or ".".join(map(str, line_of(n["version"])))
 
 
 def why(result):
@@ -222,6 +233,8 @@ def why(result):
             out += [[run + ": ", False], ["not affected", True], [f" (Fortinet doesn't list it as affected).", False]]
         elif st == "upgrade":
             out += [[run + ": ", False], [f"upgrade to {n['fix']}", True], [".", False]]
+        elif st == "line" and n.get("vendor") == "VMware":
+            out += [[run + ": ", False], [f"check it's on {n['fix']} or later", True], [".", False]]
         elif st == "line":
             out += [[run + ": ", False], [f"make sure each one is on {n['fix']} or later", True], [".", False]]
         elif st == "rangeline":
@@ -229,16 +242,20 @@ def why(result):
         elif st == "upcoming":
             out += [[run + ": ", False], [f"upgrade to {n['fix']}", True], [" when it's released.", False]]
         elif st == "migrate":
-            out += [[run + ": ", False], [f"no fix on the {_line(n['version'])} line", True], [", move to a fixed release.", False]]
+            out += [[run + ": ", False], [f"no fix on the {_line(n)} line", True], [", move to a fixed release.", False]]
         elif st == "affectedline":
-            out += [[run + ": ", False], [f"the whole {_line(n['version'])} line is affected", True],
+            out += [[run + ": ", False], [f"the whole {_line(n)} line is affected", True],
                     [", move to a fixed release.", False]]
+        elif st == "needline":
+            out += [[run + ": ", False], ["add the release line", True],
+                    [f" (e.g. 8.0 U3k build {n['version']}) so it can be compared.", False]]
         elif st == "affected":
             out += [[run + ": ", False], ["affected", True],
                     [f" (up to {n['upto']}); Fortinet gives no fix version here, check the advisory.", False]]
         else:
-            out += [[run + f": {n['vendor']} lists no fix for the {_line(n['version'])} line", False],
-                    [" (usually means it isn't affected; check the advisory).", False]]
+            hint = (" (older lines are often past end of support; check the advisory)." if n.get("vendor") == "VMware"
+                    else " (usually means it isn't affected; check the advisory).")
+            out += [[run + f": {n['vendor']} lists no fix for the {_line(n)} line", False], [hint, False]]
     return out
 
 

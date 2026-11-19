@@ -771,8 +771,8 @@ function invFormBox(e) {
     <label>Words that identify it in the feeds<input name="terms" maxlength="400" value="${esc((e.terms || []).join(", "))}" placeholder="Comma-separated. Empty = the product name"></label>
     <p class="help small">Whole words, any case, matched against product names only (not descriptions). FortiGate shows up as <b>FortiOS</b> in Fortinet's and CISA's lists, so use “FortiGate, FortiOS”.</p>
     <div class="inv-preview" id="inv-preview"></div>
-    <label>Versions we run (optional)<input name="version" maxlength="120" value="${esc(e.version || "")}" placeholder="e.g. 7.4.8 · 7.4.8, 7.6.3 · 7.4.x for a mix · 2026-11 for Microsoft"></label>
-    <p class="help small">Fortinet and TrueNAS advisories are checked against these: when every version you run already has the fix, the item moves to Done by itself. For Microsoft products enter the month you're patched through (e.g. 2026-11 once November's Patch Tuesday update is installed everywhere): anything Microsoft fixed in that month or earlier moves to Done. Other sources don't publish fixed versions, so there it's a note. Use 7.4.x when you have several patch levels on one line: Heads Up then tells you which version to check for, but won't close the item by itself.</p>
+    <label>Versions we run (optional)<input name="version" maxlength="120" value="${esc(e.version || "")}" placeholder="e.g. 7.4.8 · 7.4.x for a mix · 2026-11 for Microsoft · 8.0 U3m for vCenter"></label>
+    <p class="help small">Fortinet and TrueNAS advisories are checked against these: when every version you run already has the fix, the item moves to Done by itself. For Microsoft products enter the month you're patched through (e.g. 2026-11 once November's Patch Tuesday update is installed everywhere): anything Microsoft fixed in that month or earlier moves to Done. VMware vCenter: the update (8.0 U3m) or the appliance version (8.0.3.01200); ESXi: the release and build (8.0 U3k build 25595708). Other sources don't publish fixed versions, so there it's a note. Use 7.4.x when you have several patch levels on one line: Heads Up then tells you which version to check for, but won't close the item by itself.</p>
     <label>Note (optional)<input name="note" maxlength="200" value="${esc(e.note || "")}" placeholder="e.g. 2 firewalls at HQ, owner: network team"></label>
     <p class="err" id="inv-err"></p>
     <div class="actions"><button type="button" class="ghost" id="inv-cancel">Cancel</button><button class="primary">${isNew ? "Add" : "Save"}</button></div>
@@ -806,7 +806,7 @@ function renderInventory() {
       <button class="ghost d-close" id="d-close" title="Close (Esc)">✕</button>
       <div class="d-group">Settings</div>
       <h3>What we run</h3>
-      <p class="d-why">The products your organisation uses. Anything on the list is marked <span class="ours">WE RUN</span> and sorted first: if attackers are using it, it goes to Act now whatever its age; if it's serious (severity 7+), to Patch soon. Add the versions you run (or, for Microsoft, the month you're patched through) and Fortinet, TrueNAS and Microsoft items that are already fixed for you move to Done (marked <span class="ours">FIXED IN YOURS</span>).${invData.canEdit ? "" : " Ask an admin to change the list."}</p>
+      <p class="d-why">The products your organisation uses. Anything on the list is marked <span class="ours">WE RUN</span> and sorted first: if attackers are using it, it goes to Act now whatever its age; if it's serious (severity 7+), to Patch soon. Add the versions you run (or, for Microsoft, the month you're patched through) and Fortinet, TrueNAS, Microsoft and VMware items that are already fixed for you move to Done (marked <span class="ours">FIXED IN YOURS</span>).${invData.canEdit ? "" : " Ask an admin to change the list."}</p>
     </div>
     <div class="d-body">
       ${invForm ? invFormBox(invForm) : ""}

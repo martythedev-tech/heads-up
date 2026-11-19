@@ -271,13 +271,14 @@ def describe(v, releases, today, entries=None):
             desc = " ".join(words[1:])
 
     ours = v.get("ours") or []
-    # the versions you run against the fixed versions Fortinet and TrueNAS publish
+    # the versions you run against the fixed versions Fortinet, TrueNAS, Microsoft and VMware publish
     fixes = [f for page in fn_pages.values() for f in VS.fortinet_fixes(page.get("fixes"))]
     fixes += [f for page in tn_pages.values() for f in VS.truenas_fixes(page.get("fixedIn"))]
     ranges = VS.fortinet_ranges([r for page in fn_pages.values() for r in page.get("ranges") or []])
     ms_fix = VS.ms_fixes([c.get("msFix") for c in cves])
-    vcheck = (VS.check([entries[n] for n in ours if n in (entries or {})], fixes, ranges, ms_fix)
-              if ours and (fixes or ranges or ms_fix) else None)
+    vm_ranges = [r for c in cves for r in c.get("vmware") or []]
+    vcheck = (VS.check([entries[n] for n in ours if n in (entries or {})], fixes, ranges, ms_fix, vm_ranges)
+              if ours and (fixes or ranges or ms_fix or vm_ranges) else None)
     ms_noted = bool(vcheck) and any(n.get("vendor") == "Microsoft" for n in vcheck["notes"])
     triage = p.get("triage")
     manual = (triage or {}).get("state") not in (None, "untriaged")
