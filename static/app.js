@@ -487,6 +487,17 @@ function radarLink(id) {
   return /^CVE-\d{4}-\d+$/.test(id) ? `<div class="small"><a href="https://radar.cloudflare.com/zero-wire/cves/${esc(id)}" target="_blank" rel="noopener" title="Affected versions, fixes, every CVSS score and CISA's SSVC rating on Cloudflare Radar">Details on Cloudflare Radar</a></div>` : "";
 }
 
+// CISA's SSVC decision points for one CVE, worst first in colour.
+function ssvcCell(s) {
+  if (!s) return `<span class="muted">not rated yet</span>`;
+  const ex = { active: ["crit", "Attacks seen"], poc: ["high", "Proof of concept"], none: ["none", "No attacks seen"] }[s.exploitation];
+  const rows = [];
+  if (ex) rows.push(`<span class="v ${ex[0]}">${ex[1]}</span>`);
+  if (s.automatable) rows.push(s.automatable === "yes" ? `<span class="v high">Automatable</span>` : `<span class="muted">Not automatable</span>`);
+  if (s.impact) rows.push(s.impact === "total" ? `<span class="v crit">Total impact</span>` : `<span class="muted">Partial impact</span>`);
+  return rows.map((r) => `<div>${r}</div>`).join("");
+}
+
 function scoresBox(v) {
   let list = v.cveList;
   if (!list.length) return "";
@@ -497,10 +508,11 @@ function scoresBox(v) {
     return `<tr><td><a class="mono" href="https://nvd.nist.gov/vuln/detail/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a>${radarLink(c.id)}</td>
       <td>${sev ? `<span class="v ${sev.cls}">${sev.label} · ${c.cvss.toFixed(1)}</span>${c.cvssFrom ? ` <span class="muted small">(${esc(c.cvssFrom)})</span>` : ""}` : `<span class="muted">not scored yet</span>`}</td>
       <td>${ex ? `<span class="v ${ex.cls}">${ex.label}</span> <span class="muted">(${ex.pct}%)</span>${c.epssSeries && c.epssSeries.length > 1 ? `<div class="spark-row">${sparkline(c.epssSeries)}<span class="muted small">${(c.epssSeries[0].e * 100).toFixed(1)}% on ${esc(day(c.epssSeries[0].d))}</span></div>` : ""}` : `<span class="muted">unknown</span>`}</td>
-      <td>${c.kev ? `<span class="v crit">Yes</span> <span class="muted">since ${esc(day(c.kev.added))}</span>` : `<span class="muted">not confirmed</span>`}</td></tr>`;
+      <td>${c.kev ? `<span class="v crit">Yes</span> <span class="muted">since ${esc(day(c.kev.added))}</span>` : `<span class="muted">not confirmed</span>`}</td>
+      <td>${ssvcCell(c.ssvc)}</td></tr>`;
   }).join("");
   return `<div class="box"><h4>Scores per CVE${v.cveList.length > list.length ? ` <span class="muted small">(${list.length} most likely to be exploited, of ${v.cveList.length})</span>` : ""}</h4>
-    <table class="cves"><thead><tr><th>CVE</th><th>Severity<small>0–10, from NVD, or the vendor where named</small></th><th>Exploit chance<small>next 30 days, trend over the last month, from FIRST</small></th><th>Exploited<small>from CISA</small></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    <table class="cves"><thead><tr><th>CVE</th><th>Severity<small>0–10, from NVD, or the vendor where named</small></th><th>Exploit chance<small>next 30 days, trend over the last month, from FIRST</small></th><th>Exploited<small>from CISA</small></th><th>CISA rating<small>SSVC: attacks seen, automatable, impact</small></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function triageBox(v) {

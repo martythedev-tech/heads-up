@@ -213,6 +213,7 @@ def describe(v, releases, today, entries=None):
     exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates) or bool(fn_dates)
     # CISA's KEV (or VulnCheck's copy of it) says ransomware gangs are known to use one of its CVEs
     ransomware = any((c.get(src) or {}).get("ransomware") == "Known" for c in cves for src in ("kev", "vulncheck"))
+    ssvc = worst_ssvc([c["ssvc"] for c in cves if c.get("ssvc")])
     kev_last = kev_dates[-1] if kev_dates else (vc_dates[-1] if vc_dates else (ms_dates[-1] if ms_dates else
                                                                               (fn_dates[-1] if fn_dates else None)))
     exploited_by = ("CISA" if kev_dates else "VulnCheck" if vc_dates else "Microsoft" if ms_exploited
@@ -350,7 +351,8 @@ def describe(v, releases, today, entries=None):
     elif ms_disclosed:
         why += [["Publicly disclosed", True], [" before Microsoft's fix (a zero-day); not seen exploited yet.", False]]
     elif zw:
-        why += cf_says(zw, ". Not confirmed as exploited yet.")
+        # CISA's SSVC rating reporting attacks is said below; don't contradict it here
+        why += cf_says(zw, "." if ssvc and ssvc["exploitation"] == "active" else ". Not confirmed as exploited yet.")
     elif p["source"] == "fortinet" and fn:
         why += [["Fortinet advisory for your ", False], [", ".join(fn["yours"] or fn["products"]), True],
                 [f" (CVSS {fn['cvss']:.1f})." if fn.get("cvss") is not None else ".", False]]
@@ -380,6 +382,11 @@ def describe(v, releases, today, entries=None):
         why += [[" Unverified public exploit code", True], [" is on GitHub. Don't run it: some of these are fakes or malware.", False]]
     elif not done and exploit == "poc" and not exploited:
         why += [[" Proof-of-concept code is on GitHub.", False]]
+    if not done and ssvc:
+        if ssvc["exploitation"] == "active" and not exploited:
+            why += [[" CISA has seen attacks", True], [" (its SSVC rating), though it isn't on CISA's exploited list yet.", False]]
+        if ssvc["automatable"] == "yes" and ssvc["impact"] == "total":
+            why += [[" CISA: attacks can be automated", True], [" and give full control of the system.", False]]
     if not done and not exploited and epss_trend == "rising":
         why += [[" Exploit chance is rising", True], [f" (from {epss_was * 100:.1f}% a month ago).", False]]
     if not done and tn_softened:
@@ -415,7 +422,7 @@ def describe(v, releases, today, entries=None):
                                 ("Ubuntu", bool(ubuntu["fixed"] or ubuntu["pending"]))) if on]
     return {
         "id": v["id"], "group": group, "title": title, "desc": desc, "why": why,
-        "cvss": cvss, "epss": epss, "exploited": exploited, "ransomware": ransomware, "kevLast": kev_last,
+        "cvss": cvss, "epss": epss, "exploited": exploited, "ransomware": ransomware, "ssvc": ssvc, "kevLast": kev_last,
         "ubuntu": ubuntu, "usnPrimary": v["usnPrimary"], "ubuntuPriority": prio,
         "cveCount": len(cves), "reportedBy": reported,
         "exploit": exploit, "exploitCounts": {"msf": n_msf, "edb": n_edb, "poc": n_poc},
@@ -433,6 +440,27 @@ def describe(v, releases, today, entries=None):
                         [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"]] if i]) or "",
         "triage": triage, "versionCheck": vcheck, "autoDone": auto_fixed,
     }
+
+
+SSVC_ORDER = {"exploitation": ["none", "poc", "active"], "automatable": ["no", "yes"], "impact": ["partial", "total"]}
+
+
+def worst_ssvc(found):
+    """The most urgent of CISA's SSVC ratings across an entry's CVEs (each decision point on its own), or None."""
+    if not found:
+        return None
+    rank = lambda k, s: SSVC_ORDER[k].index(s[k]) if s.get(k) in SSVC_ORDER[k] else -1
+    return {k: max(found, key=lambda s: rank(k, s)).get(k) for k in SSVC_ORDER}
+
+
+def ssvc_text(s):
+    """'exploitation active · automatable · total impact'"""
+    if not s:
+        return None
+    parts = [f"exploitation {s['exploitation']}" if s.get("exploitation") else None,
+             {"yes": "automatable", "no": "not automatable"}.get(s.get("automatable")),
+             f"{s['impact']} impact" if s.get("impact") else None]
+    return " · ".join(p for p in parts if p)
 
 
 def why_text(v):

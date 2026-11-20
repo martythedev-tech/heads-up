@@ -40,11 +40,12 @@ import fortinet as FN
 import inventory as INV
 import vulncheck as VC
 import vmware as VM
+import ssvc as SSVC
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.18.0"
+VERSION = "0.19.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -140,6 +141,7 @@ def db_open():
     INV.migrate(db)
     VC.migrate(db)
     VM.migrate(db)
+    SSVC.migrate(db)
     return db
 
 
@@ -572,6 +574,12 @@ class Fetcher:
             await VM.lookup(self.db, self.session)
         except Exception as e:
             log(f"VMware CVE records: {e!r}")
+        # CISA's SSVC rating from the CVE records: briefing and CISA CVEs first, then the rest scored
+        try:
+            n = await SSVC.lookup(self.db, self.session, sorted(detailed), sorted(scored - detailed))
+            source_ok(self.db, "ssvc", n)
+        except Exception as e:
+            source_err(self.db, "ssvc", e)
         # Ubuntu's priority for every CVE in a notice, via OSV (reliable, fast).
         marks = ",".join("?" * len(everything)) or "''"
         todo = [r["id"] for r in self.db.execute(
@@ -825,6 +833,8 @@ def build_state(db, inventory=None):
         cves[cve_id]["msFix"] = fix
     for cve_id, rs in VM.cve_ranges(db, cves).items():
         cves[cve_id]["vmware"] = rs
+    for cve_id, s in SSVC.cve_info(db, cves).items():
+        cves[cve_id]["ssvc"] = s
     for cve_id, info in FN.cve_info(db, cves).items():
         cves[cve_id]["fortinet"] = info
         use_vendor_score(cves[cve_id], info, "Fortinet")

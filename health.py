@@ -22,6 +22,7 @@ WATCHED = {
     "epss": ("exploit chance (FIRST)", HOUR, True),
     "radar": ("Cloudflare Radar", HOUR, True),
     "nvd": ("severity scores (NVD)", 2 * HOUR, False),
+    "ssvc": ("CISA's SSVC rating (CVE records)", HOUR, False),
     "poc": ("GitHub exploit check", HOUR, False),
     "backup": ("the nightly backup", 24 * HOUR, True),
 }
