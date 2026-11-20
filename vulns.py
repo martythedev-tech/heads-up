@@ -211,6 +211,8 @@ def describe(v, releases, today, entries=None):
     fn_dates = sorted(f["published"] for f in fn_pages.values() if f.get("exploited") and f.get("published"))
     fn_urgent = fn_mine and (fn.get("cvss") or 0) >= 9 and TN.is_recent(fn.get("published"), days=FN.SOON_DAYS, today=today)
     exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates) or bool(fn_dates)
+    # CISA's KEV (or VulnCheck's copy of it) says ransomware gangs are known to use one of its CVEs
+    ransomware = any((c.get(src) or {}).get("ransomware") == "Known" for c in cves for src in ("kev", "vulncheck"))
     kev_last = kev_dates[-1] if kev_dates else (vc_dates[-1] if vc_dates else (ms_dates[-1] if ms_dates else
                                                                               (fn_dates[-1] if fn_dates else None)))
     exploited_by = ("CISA" if kev_dates else "VulnCheck" if vc_dates else "Microsoft" if ms_exploited
@@ -331,6 +333,8 @@ def describe(v, releases, today, entries=None):
         why += [["Marked ", False], [STATE_LABEL[triage["state"]], True], [f" by {triage['by']}.", False]]
     elif exploited:
         why += [["Attackers are using this", True], [f", confirmed by {exploited_by} on {short_date(kev_last)}.", False]]
+        if ransomware:
+            why += [[" Ransomware gangs use it.", True]]
         if fn_not_mine and not ours:
             why += [[f" Not one of your Fortinet products ({', '.join(fn.get('products') or [])}).", False]]
         if exploited_by == "VulnCheck":
@@ -411,7 +415,7 @@ def describe(v, releases, today, entries=None):
                                 ("Ubuntu", bool(ubuntu["fixed"] or ubuntu["pending"]))) if on]
     return {
         "id": v["id"], "group": group, "title": title, "desc": desc, "why": why,
-        "cvss": cvss, "epss": epss, "exploited": exploited, "kevLast": kev_last,
+        "cvss": cvss, "epss": epss, "exploited": exploited, "ransomware": ransomware, "kevLast": kev_last,
         "ubuntu": ubuntu, "usnPrimary": v["usnPrimary"], "ubuntuPriority": prio,
         "cveCount": len(cves), "reportedBy": reported,
         "exploit": exploit, "exploitCounts": {"msf": n_msf, "edb": n_edb, "poc": n_poc},

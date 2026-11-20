@@ -104,6 +104,8 @@ def facts(v):
     else:
         out.append(("Severity", V.severity_text(v["cvss"]) or "Not scored yet"))
         out.append(("Exploited", f"Yes ({v.get('exploitedBy') or 'CISA'}, {V.short_date(v['kevLast'])})" if v["exploited"] else "Not confirmed"))
+        if v.get("ransomware"):
+            out.append(("Ransomware", "Known to be used in ransomware attacks"))
     if not v["usnPrimary"]:
         out.append(("Public exploit", {"metasploit": "Yes, Metasploit module", "exploitdb": "Yes, Exploit-DB",
                                        "poc": "Proof-of-concept on GitHub"}.get(v.get("exploit"), "None known")))
@@ -168,7 +170,7 @@ def payload(kind, event, v, extra, link, name="Heads Up"):
             }}]}
     return {"event": event, "headline": head, "text": body, "link": link,
             "vulnerability": {k: v.get(k) for k in ("id", "group", "title", "desc", "cvss", "epss",
-                                                     "exploited", "kevLast", "ubuntu", "reportedBy")},
+                                                     "exploited", "ransomware", "kevLast", "ubuntu", "reportedBy")},
             "status": extra if event == "status" else None}
 
 

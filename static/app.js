@@ -8,7 +8,7 @@ const REL_NAME = { resolute: "26.04", noble: "24.04", jammy: "22.04", focal: "20
 const rel = (r) => REL_NAME[r] || r;
 
 const SOURCES = {
-  cf: { name: "Cloudflare", what: "Expert write-ups of the most important internet-facing vulnerabilities, with what to do.", feeds: ["zerowire"], url: "https://radar.cloudflare.com/security/zero-wire", stale: 2 * 3600 },
+  cf: { name: "Cloudflare", what: "Expert write-ups of the most important internet-facing vulnerabilities, with what to do.", feeds: ["zerowire"], url: "https://radar.cloudflare.com/zero-wire", stale: 2 * 3600 },
   cisa: { name: "CISA", what: "US government list of vulnerabilities attackers are confirmed to be using.", feeds: ["kev"], url: "https://www.cisa.gov/known-exploited-vulnerabilities-catalog", stale: 8 * 3600 },
   ubu: { name: "Ubuntu", what: "Security updates for Ubuntu and whether each release has a fix yet.", feeds: ["ubuntu", "osv"], url: "https://ubuntu.com/security/notices", stale: 3 * 3600 },
   vc: { name: "VulnCheck KEV", what: "Exploited vulnerabilities, often earlier than CISA, with citations. Needs a free token.", feeds: ["vulncheck"], url: "https://vulncheck.com/kev", stale: 8 * 3600 },
@@ -188,7 +188,8 @@ function moreSection() {
 function badges(v) {
   const b = [];
   if (v.zw) b.push(`<span class="badge cf">Cloudflare <span class="detail">briefing</span></span>`);
-  if (v.cveList.some((c) => c.kev)) b.push(`<span class="badge cisa">CISA <span class="detail">exploited</span></span>`);
+  const ransomware = v.cveList.some((c) => c.kev?.ransomware === "Known" || c.vulncheck?.ransomware === "Known");
+  if (v.cveList.some((c) => c.kev)) b.push(`<span class="badge cisa">CISA <span class="detail">exploited${ransomware ? " · ransomware" : ""}</span></span>`);
   const onCisa = v.cveList.some((c) => c.kev), onVc = v.cveList.some((c) => c.vulncheck);
   if (onVc && (!onCisa || v.vcLeadDays)) b.push(`<span class="badge vc">VulnCheck KEV <span class="detail">${onCisa ? `${v.vcLeadDays} d before CISA` : "exploited"}</span></span>`);
   if (v.microsoft) b.push(`<span class="badge ms">Microsoft <span class="detail">${v.microsoft.exploited ? "zero-day, fixed" : v.microsoft.disclosed ? "disclosed, fixed" : "fix out"}</span></span>`);
@@ -481,6 +482,11 @@ function exploitBox(v) {
   </div>`;
 }
 
+// Cloudflare Radar's page for one CVE: affected versions, fixes, every CVSS score, SSVC, weaknesses.
+function radarLink(id) {
+  return /^CVE-\d{4}-\d+$/.test(id) ? `<div class="small"><a href="https://radar.cloudflare.com/zero-wire/cves/${esc(id)}" target="_blank" rel="noopener" title="Affected versions, fixes, every CVSS score and CISA's SSVC rating on Cloudflare Radar">Details on Cloudflare Radar</a></div>` : "";
+}
+
 function scoresBox(v) {
   let list = v.cveList;
   if (!list.length) return "";
@@ -488,7 +494,7 @@ function scoresBox(v) {
   const rows = list.map((c) => {
     const sev = severity(c.cvss);
     const ex = exploitChance(c.epss);
-    return `<tr><td><a class="mono" href="https://nvd.nist.gov/vuln/detail/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a></td>
+    return `<tr><td><a class="mono" href="https://nvd.nist.gov/vuln/detail/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.id)}</a>${radarLink(c.id)}</td>
       <td>${sev ? `<span class="v ${sev.cls}">${sev.label} · ${c.cvss.toFixed(1)}</span>${c.cvssFrom ? ` <span class="muted small">(${esc(c.cvssFrom)})</span>` : ""}` : `<span class="muted">not scored yet</span>`}</td>
       <td>${ex ? `<span class="v ${ex.cls}">${ex.label}</span> <span class="muted">(${ex.pct}%)</span>${c.epssSeries && c.epssSeries.length > 1 ? `<div class="spark-row">${sparkline(c.epssSeries)}<span class="muted small">${(c.epssSeries[0].e * 100).toFixed(1)}% on ${esc(day(c.epssSeries[0].d))}</span></div>` : ""}` : `<span class="muted">unknown</span>`}</td>
       <td>${c.kev ? `<span class="v crit">Yes</span> <span class="muted">since ${esc(day(c.kev.added))}</span>` : `<span class="muted">not confirmed</span>`}</td></tr>`;

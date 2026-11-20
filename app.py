@@ -44,7 +44,7 @@ import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.17.0"
+VERSION = "0.18.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -66,7 +66,7 @@ ASSET_VERSION = hashlib.sha256(b"".join(
     (HERE / "static" / f).read_bytes() for f in ("app.js", "charts.js", "style.css", "index.html"))).hexdigest()[:10]
 SESSION_DAYS = 30
 
-ZERO_WIRE_RSS = "https://radar.cloudflare.com/security/zero-wire/rss"
+ZERO_WIRE_RSS = "https://radar.cloudflare.com/zero-wire/rss"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 USN_JSON = "https://ubuntu.com/security/notices.json"
 UBUNTU_CVE = "https://ubuntu.com/security/cves/{}.json"

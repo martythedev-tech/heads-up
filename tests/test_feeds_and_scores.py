@@ -129,6 +129,30 @@ def test_fortinet_score_used():
     assert next(v for v in st["vulns"] if v["id"] == "fn:FG-1")["cvss"] == 8.1
 
 
+def add_kev(db, cve, ransomware):
+    recent = (app.datetime.now(app.timezone.utc).date() - app.timedelta(days=2)).isoformat()
+    add_item(db, f"kev:{cve}", "kev", [cve], title="Example Product", tags=["Example"])
+    db.execute("INSERT INTO kev(cve, vendor, product, name, added, due, ransomware, description) VALUES(?,?,?,?,?,?,?,?)",
+               (cve, "Example", "Product", "Example flaw", recent, recent, ransomware, "x"))
+
+
+def test_ransomware_use_is_named_in_why_and_webhooks():
+    db = fresh()
+    db.execute("DELETE FROM kev")
+    add_kev(db, "CVE-2026-3", "Known")
+    add_kev(db, "CVE-2026-4", "Unknown")
+    st = app.build_state(db)
+    rw = next(v for v in st["vulns"] if v["id"] == "kev:CVE-2026-3")
+    plain = next(v for v in st["vulns"] if v["id"] == "kev:CVE-2026-4")
+    assert rw["ransomware"] is True and "Ransomware gangs use it." in why(rw), why(rw)
+    assert plain["ransomware"] is False and "Ransomware" not in why(plain), why(plain)
+    facts = dict(W.facts(rw))
+    assert facts.get("Ransomware") == "Known to be used in ransomware attacks", facts
+    assert "Ransomware" not in dict(W.facts(plain))
+    body = W.payload("generic", "act", rw, None, "https://hu.example/")
+    assert body["vulnerability"]["ransomware"] is True, body["vulnerability"]
+
+
 def enrich_nvd_calls(db):
     f = app.Fetcher(db)
     calls = []
