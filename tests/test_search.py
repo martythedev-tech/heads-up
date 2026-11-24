@@ -22,6 +22,7 @@ def make_db():
             mod.migrate(db)
     db.executescript(app.VC.SCHEMA)
     db.executescript(app.FN.SCHEMA)
+    db.executescript(app.NJ.SCHEMA)
 
     def ms(cve, title, tag, sev, exploited=0, disclosed=0, cvss=8.1):
         db.execute("INSERT INTO msrc(cve, release, released, title, tag, severity, impact, exploited, disclosed, likelihood, cvss, action)"

@@ -1,0 +1,292 @@
+<!doctype html><html><body><main><h1>Wednesday, November 11, 2026 Security Releases</h1><section><div class="mLkwoq_avatarGroup mLkwoq_medium"><span class="j-1Igq_avatar j-1Igq_medium cursor-pointer" data-state="closed"><a href="https://github.com/nodejs" target="_blank" class="j-1Igq_wrapper"><span class="j-1Igq_item j-1Igq_medium">TNJP</span></a></span></div><p>The Node.js Project</p></section><div class="pL4wLa_root pL4wLa_vulnerability"><div class="pL4wLa_container" aria-hidden="true">Wednesday, November 11, 2026 Security Releases</div></div><h1 id="security-releases-available"><a href="#security-releases-available">Security releases available</a></h1>
+<p>Updates are now available for the 26.x, 24.x, 22.x Node.js release lines for the
+following issues.</p>
+<h2 id="patched-vulnerabilities"><a href="#patched-vulnerabilities">Patched vulnerabilities</a></h2>
+<p>This security release includes the following dependency updates to address public vulnerabilities:</p>
+<ul>
+<li>llhttp on 22.x, 24.x, 26.x</li>
+<li>undici on 24.x, 26.x</li>
+<li>sqlite on 22.x, 24.x</li>
+</ul>
+<h3 id="http2-remote-abort-check_eqcurrent_nghttp2_memory_-0-in-http2session-cve-2026-123863---high"><a href="#http2-remote-abort-check_eqcurrent_nghttp2_memory_-0-in-http2session-cve-2026-123863---high">HTTP/2: remote abort, <code>CHECK_EQ(current_nghttp2_memory_, 0)</code> in <code>~Http2Session()</code> (CVE-2026-123863) - (high)</a></h3>
+<p>A reachable assertion in Node.js HTTP/2 session teardown lets any unauthenticated
+client abort the server, over both TLS and cleartext. A client can arrange for an
+Http2Stream that still holds nghttp2-allocated header buffers to outlive its
+session: the stream is removed from the session&#x27;s stream set but never detached,
+so when <code>~Http2Session()</code> runs the memory accounting is nonzero and the
+<code>CHECK_EQ(current_nghttp2_memory_, 0)</code> assertion fails, terminating the process.
+The trigger needs only a default http2 server whose handler responds before the
+request body has ended, which is typical. It is a variant of CVE-2024-27983 that
+the earlier fix did not cover, because that fix only detached streams still
+tracked in the session.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 24.x, 26.x</li>
+</ul>
+<p>Thank you, to Chris Rohlf in collaboration with Claude and Anthropic Research
+for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="https-a-zero-length-tls-write-re-enters-llhttp_execute-and-the-server-copies-its-own-heap-into-the-request-body-cve-2026-123864---high"><a href="#https-a-zero-length-tls-write-re-enters-llhttp_execute-and-the-server-copies-its-own-heap-into-the-request-body-cve-2026-123864---high">HTTPS: a zero-length TLS write re-enters <code>llhttp_execute()</code>, and the server copies its own heap into the request body (CVE-2026-123864) - (high)</a></h3>
+<p>A re-entrancy flaw in Node.js HTTPS lets an unauthenticated client read memory
+belonging to other connections, including TLS private keys and
+other users&#x27; requests. <code>TLSWrap::DoWrite()</code> calls <code>ClearOut()</code> directly when
+asked to write zero bytes; if that write is issued from JavaScript running inside
+the HTTP parser&#x27;s <code>on_body</code> callback, <code>ClearOut()</code> decrypts the next TLS record
+while the parser is still mid-body, re-entering <code>llhttp_execute()</code> and causing a
+use-after-free and an out-of-bounds heap read. The server then copies that freed
+or unrelated heap memory into the response for the request body. Triggering it
+requires a handler that calls <code>res.flushHeaders()</code> before the request body ends
+and later calls <code>res.end()</code> with a non-empty chunk, and reading the leaked memory
+requires any ordinary route that echoes or stores a request body. Cleartext
+<code>node:http</code> is not affected.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to Chris Rohlf in collaboration with Claude and Anthropic Research
+for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="http2-sessions-never-clean-up-if-a-protocol-error-is-triggered-during-connection-shutdown-cve-2026-123865---high"><a href="#http2-sessions-never-clean-up-if-a-protocol-error-is-triggered-during-connection-shutdown-cve-2026-123865---high">HTTP/2 sessions never clean up if a protocol error is triggered during connection shutdown (CVE-2026-123865) - (high)</a></h3>
+<p>An unauthenticated HTTP/2 client can permanently leak Node.js server memory and
+file descriptors. If a peer triggers a protocol error, for example an oversized
+frame header, while the session is already shutting down, nghttp2 tears the
+session down internally but Node.js never notices, leaving a dangling session:
+the socket stays in <code>CLOSE_WAIT</code> and all of Node.js HTTP/2 state for that
+connection is held in memory indefinitely, with no further cost to the attacker.
+The attacker can start the shutdown remotely by sending <code>GOAWAY(NO_ERROR)</code>, so
+it is reliable against default HTTP/2 servers. It is an incomplete-fix case of
+CVE-2026-48937: that fix detected nghttp2 internal terminations by watching for
+<code>GOAWAY</code> sent while not shutting down, but missed terminations that arrive while
+the session is already shutting down.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to pimterry for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="http2-stream-teardown-can-send-freed-response-memory-to-the-peer-cve-2026-123866---high"><a href="#http2-stream-teardown-can-send-freed-response-memory-to-the-peer-cve-2026-123866---high">HTTP/2 stream teardown can send freed response memory to the peer (CVE-2026-123866) - (high)</a></h3>
+<p>A use-after-free in Node.js HTTP/2 stream teardown can leak response memory,
+including the contents of other connections&#x27; response buffers, to a peer. When a
+stream is torn down while a write is still backpressured, for example by a peer
+<code>RST_STREAM</code> or by the server&#x27;s own per-stream timeout destroying the stream, the
+stream&#x27;s response buffer is freed but a reference to it is still used, so freed
+or unrelated heap memory is written to the socket instead of the intended
+response. On Node.js 26.x and 24.x the teardown can be driven purely by a remote
+peer once the window-size change from 26.9.0 and 24.22.0 is present, and on all
+supported lines the same defect is reachable through an application-initiated
+teardown such as a per-stream idle timeout.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to aidan02 for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="nodejs-is-vulnerable-to-a-remotely-triggerable-uncaught-exception-in-tls-servers-via-deferred-handshake-callbacks-cve-2026-126051---high"><a href="#nodejs-is-vulnerable-to-a-remotely-triggerable-uncaught-exception-in-tls-servers-via-deferred-handshake-callbacks-cve-2026-126051---high">Node.js is vulnerable to a remotely triggerable uncaught exception in TLS servers via deferred handshake callbacks (CVE-2026-126051) - (high)</a></h3>
+<p>A deferred-callback use-after-destroy in Node.js TLS server handshake handling
+allows a remote, unauthenticated attacker to terminate the server process. When
+a TLS server uses any of the <code>SNICallback</code>, <code>OCSPRequest</code>, <code>newSession</code>, or
+<code>resumeSession</code> hooks, or <code>server.addContext()</code>, the corresponding OpenSSL
+callbacks are deferred, and the deferred code does not handle the underlying
+socket being destroyed between scheduling and execution. By sending a client
+hello that reaches the vulnerable path (for example, no SNI together with an
+OCSP request) followed by padding and a socket FIN, an attacker makes OpenSSL
+deliver the client hello and the end-of-file in the same tick, so the socket is
+destroyed before the deferred callback runs and the process raises an uncaught
+exception instead of emitting an <code>&#x27;error&#x27;</code> event.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 24.x, 26.x</li>
+</ul>
+<p>Thank you, to pimterry for reporting this vulnerability and for fixing it.</p>
+<h3 id="tls-12-renegotiation-allows-clients-to-change-servername-unilaterally-to-bypass-client-certificate-authentication-cve-2026-123872---high"><a href="#tls-12-renegotiation-allows-clients-to-change-servername-unilaterally-to-bypass-client-certificate-authentication-cve-2026-123872---high">TLS 1.2 renegotiation allows clients to change servername unilaterally to bypass client certificate authentication (CVE-2026-123872) - (high)</a></h3>
+<p>A client certificate authentication bypass in Node.js TLS lets a client change
+the servername during TLS 1.2 renegotiation to reach endpoints it was not
+authorized for. On a server that applies different client-certificate policies
+per hostname, for example stricter admin-only client-cert auth on one host and
+ordinary client-cert auth on another, a client that authenticates for a permitted
+host can renegotiate the TLS 1.2 connection under a different servername and carry
+its existing authentication to the protected host, bypassing the stricter policy.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to pimterry for reporting this vulnerability and for fixing it.</p>
+<h3 id="http2-use-after-free-of-http2stream-when-a-respondwithfile-stream-is-reset-during-a-pending-write-cve-2026-123874---high"><a href="#http2-use-after-free-of-http2stream-when-a-respondwithfile-stream-is-reset-during-a-pending-write-cve-2026-123874---high">HTTP/2: use-after-free of <code>Http2Stream</code> when a <code>respondWithFile()</code> stream is reset during a pending write (CVE-2026-123874) - (high)</a></h3>
+<p>A use-after-free in Node.js HTTP/2 lets an unauthenticated client corrupt server
+memory, over both TLS and cleartext, when the server serves files with
+<code>respondWithFile()</code> or <code>respondWithFD()</code>. A client can make the server free an
+<code>Http2Stream</code> while a write request that points to it is still queued on the
+socket; when that write completes, the code dereferences and makes a virtual call
+through the freed object. The only precondition is that the application serves a
+file with <code>stream.respondWithFile()</code> or <code>stream.respondWithFD()</code>, with default
+settings otherwise.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 24.x, 26.x</li>
+</ul>
+<p>Thank you, to Chris Rohlf in collaboration with Claude and Anthropic Research
+for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="remote-unauthenticated-http2-heap-buffer-overflow-in-sessionaltsvc-with-a-long-origin-cve-2026-123828---medium"><a href="#remote-unauthenticated-http2-heap-buffer-overflow-in-sessionaltsvc-with-a-long-origin-cve-2026-123828---medium">Remote unauthenticated HTTP/2 heap-buffer-overflow in <code>session.altsvc()</code> with a long origin (CVE-2026-123828) - (medium)</a></h3>
+<p>A one-byte heap buffer overflow in Node.js HTTP/2 Alt-Svc handling lets a remote,
+unauthenticated attacker corrupt process memory. When an application passes an
+attacker-controlled value such as a request&#x27;s <code>:authority</code> header to
+<code>Http2Session.altsvc()</code>, the AltSvc implementation in <code>src/node_http2.cc</code>
+allocates a buffer sized to the origin length and then writes it with a null
+terminator, placing one byte past the end of the allocation. A single request
+carrying a long but syntactically valid <code>:authority</code> triggers the out-of-bounds
+write, which aborts the process and serves as a remote heap-corruption primitive.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 24.x, 26.x</li>
+</ul>
+<p>Thank you, to zonduu for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="ca-only-sni-client-ca-overrides-fail-open-to-the-default-ca-bypassing-per-host-mtls-authorization-cve-2026-123867---medium"><a href="#ca-only-sni-client-ca-overrides-fail-open-to-the-default-ca-bypassing-per-host-mtls-authorization-cve-2026-123867---medium">CA-only SNI client-CA overrides fail open to the default CA, bypassing per-host mTLS authorization (CVE-2026-123867) - (medium)</a></h3>
+<p>A per-host mutual-TLS authorization bypass in Node.js lets a client authorized
+for the default hostname reach a protected hostname it is not authorized for.
+When a TLS server assigns a hostname a different client-certificate CA with
+<code>server.addContext(host, { ca: protectedCA })</code> but no server certificate in that
+SNI context, the per-host client CA is never installed and the handshake falls
+back to the default client CA. In <code>src/crypto/crypto_tls.cc</code>, <code>CertCbDone</code>
+installs the SNI context&#x27;s CA only when <code>setSniContext</code> succeeds, but
+<code>setSniContext</code> returns <code>false</code> for a context with no server certificate, so a
+CA-only SNI context silently keeps the default CA. A client holding a certificate
+trusted by the default CA, but not the protected CA, can therefore complete mTLS
+to the protected hostname and read its response even with <code>requestCert</code> and
+<code>rejectUnauthorized</code> enabled, while a client certified by the protected CA is
+rejected.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to aur0r4_glyph for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="http2-inbound-data-queued-on-an-undrained-stream-is-charged-to-no-session-budget-so-maxsessionmemory-neither-bounds-it-nor-refuses-new-streams-cve-2026-123868---medium"><a href="#http2-inbound-data-queued-on-an-undrained-stream-is-charged-to-no-session-budget-so-maxsessionmemory-neither-bounds-it-nor-refuses-new-streams-cve-2026-123868---medium">HTTP/2 inbound data queued on an undrained stream is charged to no session budget, so <code>maxSessionMemory</code> neither bounds it nor refuses new streams (CVE-2026-123868) - (medium)</a></h3>
+<p>An unauthenticated HTTP/2 client can exhaust Node.js server memory because
+inbound data queued on an undrained stream is charged to no session budget. Each
+inbound data frame creates one JavaScript Buffer view in the receiving stream&#x27;s
+readable queue, but nothing charges that queue to <code>current_session_memory_</code>: the
+socket read buffer is accounted only during parsing and released immediately, so
+whatever stays queued is accounted to nothing. A peer that fills a stream&#x27;s
+receive window with one-byte data frames pays about 10 wire bytes per frame
+while the server retains about 114 bytes per frame, so a single stream on one
+connection can retain hundreds of megabytes from tens of megabytes sent.
+<code>maxSessionMemory</code> neither bounds the growth nor refuses new streams, because
+<code>Http2Session::CanAddStream</code> gates admission on the same counter that never sees
+the queue.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 24.x, 26.x</li>
+</ul>
+<p>Thank you, to jiri1234 for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="proxy-credentials-disclosed-in-err_proxy_invalid_config-error-messages-cve-2026-123871---medium"><a href="#proxy-credentials-disclosed-in-err_proxy_invalid_config-error-messages-cve-2026-123871---medium">Proxy credentials disclosed in <code>ERR_PROXY_INVALID_CONFIG</code> error messages (CVE-2026-123871) - (medium)</a></h3>
+<p>Node.js discloses proxy credentials in <code>ERR_PROXY_INVALID_CONFIG</code> error messages.
+CVE-2026-48615 established that a proxy credential must not appear in a Node.js
+error message and redacted the username and password from <code>ProxyConfig.href</code>,
+but that fix missed four error paths in the same subsystem, one of them inside
+the same constructor, which interpolate the raw proxy URL, credentials included,
+into an <code>ERR_PROXY_INVALID_CONFIG</code> message. The proxy URL comes from the
+environment, but the defect is the sink: a secret that Node.js redacts everywhere
+else is emitted verbatim into a much wider audience than the process environment,
+such as <code>stderr</code>, container logs, log aggregation, and crash reporting services.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to p-v-p for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="certificate-validation-bypass-in-nodejs-httpsagent-via-cross-policy-tls-session-reuse-cve-2026-123877---medium"><a href="#certificate-validation-bypass-in-nodejs-httpsagent-via-cross-policy-tls-session-reuse-cve-2026-123877---medium">Certificate validation bypass in Node.js <code>https.Agent</code> via cross-policy TLS session reuse (CVE-2026-123877) - (medium)</a></h3>
+<p>A certificate validation bypass in Node.js <code>https.Agent</code> lets a cached TLS session
+authenticated under one CA policy be reused by a later request with a stricter policy.
+<code>https.Agent.prototype.getName()</code> assigns the same <code>Agent</code> and session-cache key
+to a request that omits ca and one that explicitly supplies <code>ca: []</code>, because an
+omitted value appends nothing to the key while an empty array stringifies to an
+empty string. The two policies differ: omitting ca uses the default trust store,
+while supplying ca replaces it. Since they share a key, a TLS session authenticated
+under the broader default policy is handed to a new connection made under the later
+<code>ca: []</code> policy, and TLS 1.3 session resumption carries the earlier authentication
+forward, so the second request reports <code>authorized === true</code> and transmits
+confidential data to a server its own CA policy would reject on a fresh connection.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to aegis1337 and mickeyjoe for reporting this vulnerability and
+thank you mcollina for fixing it.</p>
+<h3 id="http2-cancelling-one-respondwithfile-download-crashes-the-server-null-dereference-in-streampipe-cve-2026-123875---medium"><a href="#http2-cancelling-one-respondwithfile-download-crashes-the-server-null-dereference-in-streampipe-cve-2026-123875---medium">HTTP/2: cancelling one <code>respondWithFile()</code> download crashes the server (NULL dereference in <code>StreamPipe</code>) (CVE-2026-123875) - (medium)</a></h3>
+<p>A NULL pointer dereference in Node.js HTTP/2 lets an unauthenticated client crash
+the server, over both TLS and cleartext, by cancelling file downloads. When the
+server serves a file with <code>stream.respondWithFile()</code> or <code>stream.respondWithFD()</code>
+and the client cancels the request, a <code>StreamPipe</code> used for the transfer is torn
+down in an order that leaves a <code>NULL</code> pointer which is then dereferenced, aborting
+the process. No crafted frames are needed, and a handful of cancelled requests
+against a default file-serving handler is enough.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to Chris Rohlf in collaboration with Claude and Anthropic Research for
+reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="permission-model-bypass-in-recursive-fswatch-leaks-names-of-denied-descendants-cve-2026-123829---low"><a href="#permission-model-bypass-in-recursive-fswatch-leaks-names-of-denied-descendants-cve-2026-123829---low">Permission Model Bypass in recursive fs.watch Leaks Names of Denied Descendants (CVE-2026-123829) - (low)</a></h3>
+<p>A Permission Model bypass in Node.js recursive file watching discloses the names
+of files and directories the process is not permitted to read. On macOS and
+Windows, <code>fs.watch()</code> and <code>fs.promises.watch()</code> in recursive mode are backed by
+the native libuv watcher: <code>FSEventWrap::Start</code> checks <code>kFileSystemRead</code> only once,
+on the watched root, and <code>FSEventWrap::OnEvent</code> then forwards every filename
+libuv reports (relative paths at any depth) to the JavaScript callback without
+checking that each path is covered by the read grant. Code running under
+<code>--permission</code> with an exact read grant on a directory can therefore learn names
+such as sub/secret.txt even though readdir on that subdirectory is denied. The
+flaw exposes names and timing metadata, not file contents, and requires macOS or
+Windows plus files created under the watched directory by another actor.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to Trail of Bits (OpenAI) for reporting this vulnerability and thank
+you RafaelGSS for fixing it.</p>
+<h3 id="zlib-a-pending-params-plus-destroy-throws-an-uncatchable-err_internal_assertion-cve-2026-123862---low"><a href="#zlib-a-pending-params-plus-destroy-throws-an-uncatchable-err_internal_assertion-cve-2026-123862---low">zlib: a pending <code>params()</code> plus <code>destroy()</code> throws an uncatchable <code>ERR_INTERNAL_ASSERTION</code> (CVE-2026-123862) - (low)</a></h3>
+<p>An uncatchable exception in the Node.js zlib streaming API lets a peer crash a
+process by disconnecting while data is being compressed. <code>zlib.params()</code> queues
+a flush and completes its work in that write&#x27;s callback; if the stream is
+destroyed first, as <code>pipeline()</code> does when the peer goes away, <code>Writable</code> still
+invokes the callback with an error, but the callback ignores its arguments and
+asserts that the native handle still exists. The handle is gone, so an
+<code>ERR_INTERNAL_ASSERTION</code> is thrown from inside stream internals and bypasses the
+stream&#x27;s error event, the <code>params()</code> callback, and the <code>pipeline()</code> callback,
+terminating the process. An application is affected only if it calls
+<code>deflate.params()</code> while streaming to a peer, which is uncommon.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to Chris Rohlf in collaboration with Claude and Anthropic Research
+for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h3 id="permission-model-filesystem-over-grant-via-wildcard-radix-lookup-cve-2026-106071---low"><a href="#permission-model-filesystem-over-grant-via-wildcard-radix-lookup-cve-2026-106071---low">Permission Model filesystem over-grant via wildcard radix lookup (CVE-2026-106071) - (low)</a></h3>
+<p>A Node.js Permission Model filesystem over-grant lets a wildcard <code>--allow-fs-read</code>
+or <code>--allow-fs-write</code> rule match paths it should not. When the requested path is
+shorter than the prefix of a wildcard grant, the radix tree lookup stops comparing
+early and treats the path as a match, so for example <code>--allow-fs-read=/etc/passwd.*</code>
+also allows reading <code>/etc/passwd</code>. It requires the wildcard grant to sit directly
+under the root of the permission tree, such as when it is the only grant for that scope.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 22.x, 24.x, 26.x</li>
+</ul>
+<p>Thank you, to malikhamzaiqbal for reporting this vulnerability and thank you jasnell for fixing it.</p>
+<h2 id="downloads-and-release-details"><a href="#downloads-and-release-details">Downloads and release details</a></h2>
+<ul>
+<li><a href="/en/blog/release/v22.23.5/">Node.js v22.23.5</a></li>
+<li><a href="/en/blog/release/v24.22.3/">Node.js v24.22.3</a></li>
+<li><a href="/en/blog/release/v26.13.1/">Node.js v26.13.1</a></li>
+</ul>
+<hr/>
+<p>The Node.js project will release new versions of the 26.x, 24.x, 22.x
+releases lines on or shortly after, Wednesday, November 11, 2026 in order to address:</p>
+<p>The highest severity issue fixed in this release is HIGH.</p>
+<h2 id="impact"><a href="#impact">Impact</a></h2>
+<p>The highest severity issue fixed in the 26.x release line is HIGH.
+The highest severity issue fixed in the 24.x release line is HIGH.
+The highest severity issue fixed in the 22.x release line is HIGH.</p>
+<p>It&#x27;s important to note that End-of-Life versions are always affected when a security release occurs.
+To ensure your system&#x27;s security, please use an up-to-date version as outlined in our
+<a href="https://github.com/nodejs/release#release-schedule">Release Schedule</a>.</p>
+<h2 id="release-timing"><a href="#release-timing">Release timing</a></h2>
+<p>Releases will be available on, or shortly after, Wednesday, November 11, 2026.</p>
+<h2 id="contact-and-future-updates"><a href="#contact-and-future-updates">Contact and future updates</a></h2>
+<p>The current Node.js security policy can be found at <a href="https://nodejs.org/en/security/">https://nodejs.org/en/security/</a>.
+Please follow the process outlined in <a href="https://github.com/nodejs/node/blob/master/SECURITY.md">https://github.com/nodejs/node/blob/master/SECURITY.md</a> if you wish to report a vulnerability in Node.js.</p>
+<p>Subscribe to the low-volume announcement-only nodejs-sec mailing list at <a href="https://groups.google.com/forum/#!forum/nodejs-sec">https://groups.google.com/forum/#!forum/nodejs-sec</a> to stay up to date on security vulnerabilities and security-related releases of Node.js and the projects maintained in the nodejs GitHub organization.</p><div class="max-ml:grid-cols-1 mt-4 grid w-full grid-cols-2 gap-4"><div></div><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/october-2026-security-releases"><span class="A9kfJq_header A9kfJq_reverse">Next</span><span class="A9kfJq_content A9kfJq_reverse">Wednesday, October 21, 2026 Security Releases</span></a></div></main></div><aside class="_0yZVBa_wrapper" aria-label="Article metadata"><dl><dt>Last Updated</dt><dd>Nov 11, 2026</dd><dt>Reading Time</dt><dd>13 min</dd><dt>Contribute</dt><dd><svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" fill="currentColor" class="fill-neutral-700 dark:fill-neutral-100"><path d="M10 1.25C5.16562 1.25 1.25 5.16562 1.25 10C1.25 13.8719 3.75469 17.1422 7.23281 18.3016C7.67031 18.3781 7.83437 18.1156 7.83437 17.8859C7.83437 17.6781 7.82344 16.9891 7.82344 16.2563C5.625 16.6609 5.05625 15.7203 4.88125 15.2281C4.78281 14.9766 4.35625 14.2 3.98438 13.9922C3.67812 13.82</main></body></html>

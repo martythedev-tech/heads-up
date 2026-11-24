@@ -13,15 +13,16 @@ Groups:
          (Fortinet or Broadcom saying "exploited in the wild" counts as
          exploited; for a product you don't run it stays in For awareness)
          A VMware advisory (VMSA) for VMware products not on What we run stays
-         in For awareness when the list has entries.
+         in For awareness when the list has entries; so does a Node.js security
+         release when Node.js isn't on it.
   aware  everything else (incl. exploited more than 14 days ago)
   done   marked Patched or Not affected
 
 "What we run" (inventory.py) changes this for products you use:
   act    exploited, whatever its age or source (no "check whether you run it")
   soon   not exploited but serious: CVSS >= 7, Ubuntu high/critical, TrueNAS
-         High/Critical, or any Cloudflare briefing
-  done   every version you run already has Fortinet's / TrueNAS's / VMware's fix, or the
+         High/Critical, a Node.js release with high/critical issues, or any Cloudflare briefing
+  done   every version you run already has Fortinet's / TrueNAS's / VMware's / Node.js's fix, or the
          month you're patched through is at or after Microsoft's fix
          (versions.py), unless someone set a status by hand
 """
@@ -97,7 +98,7 @@ def build(items, releases, inventory=None):
     out, by_cve = [], {}
 
     def base(p):
-        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "tns": [], "fns": [], "vms": [], "usnPrimary": False}
+        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "tns": [], "fns": [], "vms": [], "njs": [], "usnPrimary": False}
 
     def add(v):
         out.append(v)
@@ -156,6 +157,18 @@ def build(items, releases, inventory=None):
                 v["vms"] = [it]
                 add(v)
     for it in items:
+        if it["source"] == "nodejs":
+            # one release covers many CVEs; join the first one already listed, but never another
+            # release (an incomplete fix can come back in the next one: two releases, two upgrades)
+            v = next((by_cve[c["id"]] for c in it["cves"]
+                      if c["id"] in by_cve and by_cve[c["id"]]["primary"]["source"] != "nodejs"), None)
+            if v:
+                v["njs"].append(it)
+            else:
+                v = base(it)
+                v["njs"] = [it]
+                add(v)
+    for it in items:
         if it["source"] == "truenas":
             # one page can cover several CVEs (Samba, Lodash); join the first one already listed
             v = next((by_cve[c["id"]] for c in it["cves"] if c["id"] in by_cve), None)
@@ -183,7 +196,7 @@ def build(items, releases, inventory=None):
     today = datetime.now(timezone.utc).date()
     entries = {e["name"]: e for e in inventory or []}
     for v in out:
-        parts = [v["primary"], v["zw"], *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"], *v["vms"]]
+        parts = [v["primary"], v["zw"], *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"], *v["vms"], *v["njs"]]
         via = {}   # product name -> the sources it matched through
         if matcher:
             for i in {id(i): i for i in parts if i}.values():
@@ -234,6 +247,11 @@ def describe(v, releases, today, entries=None):
              key=lambda x: (bool(x.get("exploited")), x.get("cvss") or 0), default=None)
     vm_dates = sorted({x["published"] for x in [*vm_pages.values(), *vm_cve.values()]
                        if x.get("exploited") and x.get("published")})
+    # what the Node.js project said: releases attached here, plus the release that fixed one of its CVEs
+    # (a release attached here wins over a newer one that merely repeats one of its CVEs)
+    nj_pages = {i["extra"]["id"]: i["extra"] for i in v["njs"]}
+    nj_cve = {c["nodejs"]["id"]: c["nodejs"] for c in cves if c.get("nodejs")}
+    nj = max(nj_pages.values() or nj_cve.values(), key=lambda x: x.get("published") or "", default=None)
     exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates) or bool(fn_dates) or bool(vm_dates)
     # CISA's KEV (or VulnCheck's copy of it) says ransomware gangs are known to use one of its CVEs
     ransomware = any((c.get(src) or {}).get("ransomware") == "Known" for c in cves for src in ("kev", "vulncheck"))
@@ -294,6 +312,8 @@ def describe(v, releases, today, entries=None):
     elif p["source"] == "vmsa":
         title = p["title"] if "vmware" in p["title"].lower() else f"VMware: {p['title']}"
         desc = p["summary"]
+    elif p["source"] == "nodejs":
+        title, desc = p["title"], p["summary"]
     else:
         title = f"{p['title']}: {kev_short(p)}"
         desc = str(p.get("summary") or "")
@@ -308,8 +328,8 @@ def describe(v, releases, today, entries=None):
     ranges = VS.fortinet_ranges([r for page in fn_pages.values() for r in page.get("ranges") or []])
     ms_fix = VS.ms_fixes([c.get("msFix") for c in cves])
     vm_ranges = [r for c in cves for r in c.get("vmware") or []]
-    vcheck = (VS.check([entries[n] for n in ours if n in (entries or {})], fixes, ranges, ms_fix, vm_ranges)
-              if ours and (fixes or ranges or ms_fix or vm_ranges) else None)
+    vcheck = (VS.check([entries[n] for n in ours if n in (entries or {})], fixes, ranges, ms_fix, vm_ranges, nj)
+              if ours and (fixes or ranges or ms_fix or vm_ranges or nj) else None)
     ms_noted = bool(vcheck) and any(n.get("vendor") == "Microsoft" for n in vcheck["notes"])
     triage = p.get("triage")
     manual = (triage or {}).get("state") not in (None, "untriaged")
@@ -328,11 +348,14 @@ def describe(v, releases, today, entries=None):
                  or exploit in ("metasploit", "exploitdb") or (cvss or 0) >= 9 or bool(zw) or bool(ms_info))
     # A VMware advisory for VMware products you don't list (when you list anything)
     vm_not_mine = p["source"] == "vmsa" and not ours and bool(entries) and not v["kevs"] and not v["vcs"]
+    # A Node.js release when Node.js isn't on What we run (when you list anything)
+    nj_not_mine = p["source"] == "nodejs" and not ours and bool(entries) and not v["kevs"] and not v["vcs"]
     # Known only through a TrueNAS impact statement that rates it Low/Medium on
     # TrueNAS: the vendor's rating wins, so at most Patch soon.
     tn_softened = bool(ours) and v.get("oursTrueNASOnly") and bool(tn) and tn.get("level") in ("low", "medium")
     ours_serious = ((cvss or 0) >= 7 or prio in ("high", "critical") or bool(zw)
-                    or (bool(tn) and tn.get("level") in ("high", "critical")))
+                    or (bool(tn) and tn.get("level") in ("high", "critical"))
+               or (bool(nj) and nj.get("highest") in ("high", "critical")))
     if done:
         group = "done"
     elif ours and exploited:
@@ -343,7 +366,7 @@ def describe(v, releases, today, entries=None):
         group = "aware"
     elif fn_not_mine and not ours:
         group = "aware"
-    elif vm_not_mine:
+    elif vm_not_mine or nj_not_mine:
         group = "aware"
     elif exploited and (cf_urgent or recent_kev):
         group = "act"
@@ -394,6 +417,19 @@ def describe(v, releases, today, entries=None):
                  + ").", False]]
         if vm_not_mine:
             why += [[f" Not one of your VMware products ({', '.join(vm.get('products') or [])}).", False]]
+    elif p["source"] == "nodejs" and nj:
+        counts = ", ".join(f"{nj['counts'][s]} {s}" for s in ("critical", "high", "medium", "low") if nj["counts"].get(s))
+        if nj["status"] == "upcoming":
+            why += [["Node.js has announced security releases", True],
+                    [f" for {short_date(nj.get('published'))}" + (f" ({counts} severity issues)" if counts else "")
+                     + "; the details come out with them.", False]]
+        else:
+            why += [["Node.js security release", True],
+                    [f" ({counts})." if counts else ".", False]]
+            if not vcheck and nj.get("fixes"):
+                why += [[" Fixed in ", False], [", ".join(nj["fixes"].values()), True], [".", False]]
+        if nj_not_mine:
+            why += [[" Node.js isn't on What we run.", False]]
     elif p["source"] == "truenas" and tn:
         if tn.get("level") == "none":
             why += [["TrueNAS itself is not affected", True],
@@ -440,6 +476,9 @@ def describe(v, releases, today, entries=None):
         why += [[" Fortinet published a statement on this.", False]]
     if not done and vm and p["source"] != "vmsa":
         why += [[" Broadcom: ", False], [vm.get("rev") or vm["id"], True], [".", False]]
+    if not done and nj and p["source"] != "nodejs":
+        why += [[" Node.js: fixed in the ", False], [f"{short_date(nj.get('published'))} security release", True],
+                [f" ({', '.join(nj['fixes'].values())})." if nj.get("fixes") and not vcheck else ".", False]]
     if not done and tn and p["source"] != "truenas" and not tn_softened:
         why += [[" TrueNAS itself is not affected." if tn.get("level") == "none"
                  else f" TrueNAS rates the impact {tn.get('rating') or 'unrated'}.", False]]
@@ -458,7 +497,7 @@ def describe(v, releases, today, entries=None):
             why += [[" Ubuntu fix still pending.", False]]
 
     reported = [s for s, on in (("Cloudflare", bool(zw)), ("CISA", bool(kev_dates)), ("VulnCheck", bool(vc_dates)),
-                                ("Microsoft", bool(ms_info)), ("TrueNAS", bool(tn)), ("Fortinet", bool(fn)), ("Broadcom", bool(vm)),
+                                ("Microsoft", bool(ms_info)), ("TrueNAS", bool(tn)), ("Fortinet", bool(fn)), ("Broadcom", bool(vm)), ("Node.js", bool(nj)),
                                 ("Ubuntu", bool(ubuntu["fixed"] or ubuntu["pending"]))) if on]
     return {
         "id": v["id"], "group": group, "title": title, "desc": desc, "why": why,
@@ -476,9 +515,10 @@ def describe(v, releases, today, entries=None):
         "tnIds": [x["id"] for x in v["tns"]], "truenas": tn,
         "fnIds": [x["id"] for x in v["fns"]], "fortinet": fn, "ours": ours,
         "vmIds": [x["id"] for x in v["vms"]], "vmsa": vm,
+        "njIds": [x["id"] for x in v["njs"]], "nodejs": nj,
         "microsoft": ms_info[0] if ms_info else None,
         "latest": _max([i.get("updated") or i.get("published") for i in
-                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"], *v["vms"]] if i]) or "",
+                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"], *v["vms"], *v["njs"]] if i]) or "",
         "triage": triage, "versionCheck": vcheck, "autoDone": auto_fixed,
     }
 

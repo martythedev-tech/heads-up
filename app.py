@@ -41,12 +41,13 @@ import inventory as INV
 import vulncheck as VC
 import vmware as VM
 import vmsa as VMSA
+import nodejs as NJ
 import ssvc as SSVC
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.20.0"
+VERSION = "0.21.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -143,6 +144,7 @@ def db_open():
     VC.migrate(db)
     VM.migrate(db)
     VMSA.migrate(db)
+    NJ.migrate(db)
     SSVC.migrate(db)
     return db
 
@@ -279,6 +281,7 @@ class Fetcher:
         self.on_truenas = None
         self.on_fortinet = None
         self.on_vmsa = None
+        self.on_nodejs = None
         self.rounds = 0
 
     async def get(self, url, *, params=None, as_json=False):
@@ -314,6 +317,7 @@ class Fetcher:
                     ("truenas", 6 * 3600, self.truenas),
                     ("fortinet", 6 * 3600, self.fortinet),
                     ("vmsa", 3 * 3600, self.vmsa),
+                    ("nodejs", 3 * 3600, self.nodejs),
                     ("enrich", 60 * 60, self.enrich),
                     ("radar", 60 * 60, self.radar),
                     ("backup", 24 * 3600, self.backup)]
@@ -524,6 +528,20 @@ class Fetcher:
             source_ok(self.db, "vmsa", n)
         if self.on_vmsa:
             await self.on_vmsa()
+
+    async def nodejs(self):
+        n = await NJ.refresh(self.db, self.session, log=log)
+        with batch(self.db):
+            ids = []
+            for item in NJ.items(self.db):
+                ids.append(item["id"])
+                upsert_item(self.db, item)
+                # its CVEs get scores (NVD) and exploit checks like any other
+                self.db.executemany("INSERT OR IGNORE INTO cve(id) VALUES(?)", [(c,) for c in item["cves"]])
+            retire_missing(self.db, "nodejs", ids)
+            source_ok(self.db, "nodejs", n)
+        if self.on_nodejs:
+            await self.on_nodejs()
 
     async def exploits(self):
         n = await X.refresh_index(self.db, self.session)
@@ -857,6 +875,8 @@ def build_state(db, inventory=None):
     for cve_id, info in VMSA.cve_info(db, cves).items():
         cves[cve_id]["vmsa"] = info
         use_vendor_score(cves[cve_id], info, "Broadcom")
+    for cve_id, info in NJ.cve_info(db, cves).items():
+        cves[cve_id]["nodejs"] = info
     for cve_id, s in SSVC.cve_info(db, cves).items():
         cves[cve_id]["ssvc"] = s
     for cve_id, info in FN.cve_info(db, cves).items():
@@ -987,6 +1007,41 @@ async def announce_vmsa(app):
         flag = "EXPLOITED · " if x["exploited"] else ""
         await app["hooks"].send_note("vmware", f"{flag}VMware {x['rev']}: {x['title']}",
                                      TN.shorten(body, 600), facts, x["link"])
+
+
+async def announce_nodejs(app):
+    """One webhook note when the Node.js project announces security releases, and one when they're out."""
+    db = app["db"]
+    sched = NJ.schedule(db)
+    rows = [NJ.info(r, sched) for r in db.execute("SELECT * FROM nodejs ORDER BY published DESC")]
+    row = db.execute("SELECT value FROM meta WHERE key='nodejs_seen'").fetchone()
+    seen = set(json.loads(row[0])) if row else None
+    keys = {f"{x['id']}:{x['status']}" for x in rows}
+    db.execute("INSERT OR REPLACE INTO meta VALUES('nodejs_seen', ?)", (json.dumps(sorted(keys | (seen or set()))),))
+    if seen is None:
+        return  # first run records what's already published
+    entries = [e for e in INV.entries(db) if NJ.is_node(e)]
+    for x in rows:
+        key = f"{x['id']}:{x['status']}"
+        if key in seen:
+            continue
+        log(f"alerts: nodejs {key}")
+        counts = NJ.counts_text(x["counts"])
+        facts = [("Highest severity", (x["highest"] or "–").title()),
+                 ("Release lines", ", ".join(f"{m}.x" for m in x["lines"]) or "–")]
+        if counts:
+            facts.append(("Issues", counts))
+        if x["fixes"]:
+            facts.append(("Fixed in", ", ".join(x["fixes"].values())))
+        if entries:
+            notes = [n for e in entries for n in NJ.check(e, x)]
+            said = {"fixed": "already fixed", "notaffected": "not affected", "upgrade": "upgrade to {fix}",
+                    "line": "check it's on {fix} or later", "due": "fix due {fix}",
+                    "affectedline": "end-of-life, no fix", "noversion": "no version entered", "unlisted": "not listed"}
+            facts.append(("You run", "; ".join(
+                f"{n['product']}{' ' + n['version'] if n.get('version') else ''}: "
+                + said.get(n["state"], n["state"]).format(fix=n.get("fix") or "") for n in notes)))
+        await app["hooks"].send_note("nodejs", NJ.title_of(x), TN.shorten(NJ.summary_of(x), 600), facts, x["link"])
 
 
 async def announce_fortinet(app):
@@ -1489,6 +1544,7 @@ def make_app(db, fetcher):
     fetcher.on_truenas = lambda: announce_truenas(app)
     fetcher.on_fortinet = lambda: announce_fortinet(app)
     fetcher.on_vmsa = lambda: announce_vmsa(app)
+    fetcher.on_nodejs = lambda: announce_nodejs(app)
     app.router.add_get("/api/charts", api_charts)
     app.router.add_get("/api/settings", api_settings)
     app.router.add_post("/api/settings/radar", api_settings_radar)

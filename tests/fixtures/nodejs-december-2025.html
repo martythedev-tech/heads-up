@@ -1,0 +1,145 @@
+<!doctype html><html><body><main><h1>Tuesday, January 13, 2026 Security Releases</h1><section><div class="mLkwoq_avatarGroup mLkwoq_medium"><span class="j-1Igq_avatar j-1Igq_medium cursor-pointer" data-state="closed"><a href="https://github.com/nodejs" target="_blank" class="j-1Igq_wrapper"><span class="j-1Igq_item j-1Igq_medium">TNJP</span></a></span></div><p>The Node.js Project</p></section><div class="pL4wLa_root pL4wLa_vulnerability"><div class="pL4wLa_container" aria-hidden="true">Tuesday, January 13, 2026 Security Releases</div></div><h2 id="security-releases-available"><a href="#security-releases-available">Security releases available</a></h2>
+<p>Updates are now available for the 25.x, 24.x, 22.x, and 20.x Node.js release lines
+to address:</p>
+<ul>
+<li>3 high severity issues.</li>
+<li>4 medium severity issues.</li>
+<li>1 low severity issue.</li>
+</ul>
+<p>This security release includes the following dependency updates to address public vulnerabilities:</p>
+<ul>
+<li>c-ares (1.34.6) on 20.x, 22.x, 24.x, 25.x</li>
+<li>undici (6.23.0, 7.18.0) on 20.x, 22.x, 24.x, 25.x</li>
+</ul>
+<h2 id="timeout-based-race-conditions-make-uint8arraybufferalloc-non-zerofilled-cve-2025-55131---high"><a href="#timeout-based-race-conditions-make-uint8arraybufferalloc-non-zerofilled-cve-2025-55131---high">Timeout-based race conditions make Uint8Array/Buffer.alloc non-zerofilled (CVE-2025-55131) - (High)</a></h2>
+<p>A flaw in Node.js&#x27;s buffer allocation logic can expose uninitialized memory when allocations are interrupted,
+when using the <code>vm</code> module with the timeout option. Under specific timing conditions, buffers allocated
+with <code>Buffer.alloc</code> and other <code>TypedArray</code> instances like <code>Uint8Array</code> may contain leftover data from previous
+operations, allowing in-process secrets like tokens or passwords to leak or causing data corruption.</p>
+<p>While exploitation typically requires precise timing or in-process code execution, it can become remotely
+exploitable when untrusted input influences workload and timeouts, leading to potential confidentiality and
+integrity impact.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 20.x, 22.x, 24.x, 25.x</li>
+</ul>
+<p>Thank you, to Nikita Skovoroda for reporting and fixing this vulnerability.</p>
+<h2 id="bypass-file-system-permissions-using-crafted-symlinks-cve-2025-55130---high"><a href="#bypass-file-system-permissions-using-crafted-symlinks-cve-2025-55130---high">Bypass File System Permissions using crafted symlinks (CVE-2025-55130) - (High)</a></h2>
+<p>A flaw in Node.js’s Permissions model allows attackers to bypass <code>--allow-fs-read</code> and <code>--allow-fs-write</code>
+restrictions using crafted relative symlink paths. By chaining directories and symlinks, a script granted
+access only to the current directory can escape the allowed path and read sensitive files. This breaks the
+expected isolation guarantees and enables arbitrary file read/write, leading to potential system compromise.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects users of the permission model on Node.js 20.x, 22.x, 24.x, and 25.x.</li>
+</ul>
+<p>Thank you, to natann for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="nodejs-http2-server-crashes-with-unhandled-error-when-receiving-malformed-headers-frame-cve-2025-59465---high"><a href="#nodejs-http2-server-crashes-with-unhandled-error-when-receiving-malformed-headers-frame-cve-2025-59465---high">Node.js HTTP/2 server crashes with unhandled error when receiving malformed HEADERS frame (CVE-2025-59465) - (High)</a></h2>
+<p>A malformed <code>HTTP/2 HEADERS</code> frame with oversized, invalid <code>HPACK</code> data can cause Node.js to crash by
+triggering an unhandled <code>TLSSocket</code> error <code>ECONNRESET</code>. Instead of safely closing the connection, the
+process crashes, enabling a remote denial of service. This primarily affects applications that do not
+attach explicit error handlers to secure sockets, for example:</p>
+<div class="HWYciG_root"><pre class="HWYciG_content shiki shiki-themes github-light-default nord twoslash lsp language-js" tabindex="0"><code><span class="line"><span style="color:#1F2328;--shiki-dark:#D8DEE9">server</span><span style="color:#1F2328;--shiki-dark:#ECEFF4">.</span><span style="color:#8250DF;--shiki-dark:#88C0D0">on</span><span style="color:#1F2328;--shiki-dark:#D8DEE9FF">(</span><span style="color:#0A3069;--shiki-dark:#ECEFF4">&#x27;</span><span style="color:#0A3069;--shiki-dark:#A3BE8C">secureConnection</span><span style="color:#0A3069;--shiki-dark:#ECEFF4">&#x27;</span><span style="color:#1F2328;--shiki-dark:#ECEFF4">,</span><span style="color:#953800;--shiki-dark:#D8DEE9"> </span><span style="color:#953800;--shiki-dark:#D8DEE9"><button data-state="closed" class="twoslash-hover">socket</button></span><span style="color:#CF222E;--shiki-dark:#81A1C1"> =&gt;</span><span style="color:#1F2328;--shiki-dark:#ECEFF4"> {</span></span>
+<span class="line"><span style="color:#1F2328;--shiki-dark:#D8DEE9">  </span><span style="color:#1F2328;--shiki-dark:#D8DEE9"><button data-state="closed" class="twoslash-hover">socket</button></span><span style="color:#1F2328;--shiki-dark:#ECEFF4">.</span><span style="color:#8250DF;--shiki-dark:#88C0D0">on</span><span style="color:#1F2328;--shiki-dark:#D8DEE9FF">(</span><span style="color:#0A3069;--shiki-dark:#ECEFF4">&#x27;</span><span style="color:#0A3069;--shiki-dark:#A3BE8C">error</span><span style="color:#0A3069;--shiki-dark:#ECEFF4">&#x27;</span><span style="color:#1F2328;--shiki-dark:#ECEFF4">,</span><span style="color:#953800;--shiki-dark:#D8DEE9"> </span><span style="color:#953800;--shiki-dark:#D8DEE9"><button data-state="closed" class="twoslash-hover">err</button></span><span style="color:#CF222E;--shiki-dark:#81A1C1"> =&gt;</span><span style="color:#1F2328;--shiki-dark:#ECEFF4"> {</span></span>
+<span class="line"><span style="color:#1F2328;--shiki-dark:#D8DEE9">    </span><span style="color:#1F2328;--shiki-dark:#D8DEE9"><button data-state="closed" class="twoslash-hover">console</button></span><span style="color:#1F2328;--shiki-dark:#ECEFF4">.</span><span style="color:#8250DF;--shiki-dark:#88C0D0"><button data-state="closed" class="twoslash-hover">log</button></span><span style="color:#1F2328;--shiki-dark:#D8DEE9FF">(</span><span style="color:#1F2328;--shiki-dark:#D8DEE9"><button data-state="closed" class="twoslash-hover">err</button></span><span style="color:#1F2328;--shiki-dark:#D8DEE9FF">)</span><span style="color:#1F2328;--shiki-dark:#81A1C1">;</span></span>
+<span class="line"><span style="color:#1F2328;--shiki-dark:#ECEFF4">  }</span><span style="color:#1F2328;--shiki-dark:#D8DEE9FF">)</span><span style="color:#1F2328;--shiki-dark:#81A1C1">;</span></span>
+<span class="line"><span style="color:#1F2328;--shiki-dark:#ECEFF4">}</span><span style="color:#1F2328;--shiki-dark:#D8DEE9FF">)</span><span style="color:#1F2328;--shiki-dark:#81A1C1">;</span></span></code></pre><div class="HWYciG_footer"><span class="HWYciG_language">JavaScript</span><button class="EPgSia_button EPgSia_neutral HWYciG_action" type="button">Copy to clipboard</button></div></div>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 20.x, 22.x, 24.x, and 25.x</li>
+</ul>
+<p>Thank you, to dantt for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="uncatchable-maximum-call-stack-size-exceeded-error-on-nodejs-via-async_hooks-leads-to-process-crashes-bypassing-error-handlers-cve-2025-59466---medium"><a href="#uncatchable-maximum-call-stack-size-exceeded-error-on-nodejs-via-async_hooks-leads-to-process-crashes-bypassing-error-handlers-cve-2025-59466---medium">Uncatchable &quot;Maximum call stack size exceeded&quot; error on Node.js via async_hooks leads to process crashes bypassing error handlers (CVE-2025-59466) - (Medium)</a></h2>
+<p>We have identified a bug in Node.js error handling where &quot;Maximum call stack size exceeded&quot; errors
+become uncatchable when <code>async_hooks.createHook()</code> is enabled.
+Instead of reaching <code>process.on(&#x27;uncaughtException&#x27;)</code>, the process terminates, making the crash unrecoverable.
+Applications that rely on <code>AsyncLocalStorage</code> (v22, v20) or <code>async_hooks.createHook()</code> (v24, v22, v20) become
+vulnerable to denial-of-service crashes triggered by deep recursion under specific conditions.</p>
+<p>This patch improves recoverability in one edge case, but it does not remove the broader risk.
+Recovery from space exhaustion is unspecified, best‑effort behavior and is not a reliable basis for
+availability or security. In availability‑critical paths where recursion depth may be influenced
+by untrusted input, prefer input validation and designs that bound or avoid recursion rather than
+depending on stack space exhaustion behavior or the lack of tail‑call optimizations in
+the runtime/engine. See <a href="/en/blog/vulnerability/january-2026-dos-mitigation-async-hooks">this blog post</a>
+for details.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects all users in active release lines: 20.x, 22.x, 24.x, and 25.x</li>
+</ul>
+<p>Thank you, to Andrew MacPherson (AndrewMohawk) for identifying &amp; aaron_vercel for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h2 id="memory-leak-that-enables-remote-denial-of-service-against-applications-processing-tls-client-certificates-cve-2025-59464---medium"><a href="#memory-leak-that-enables-remote-denial-of-service-against-applications-processing-tls-client-certificates-cve-2025-59464---medium">Memory leak that enables remote Denial of Service against applications processing TLS client certificates (CVE-2025-59464) - (Medium)</a></h2>
+<p>A memory leak in Node.js’s OpenSSL integration occurs when converting <code>X.509</code> certificate fields to UTF-8
+without freeing the allocated buffer. When applications call <code>socket.getPeerCertificate(true)</code>,
+each certificate field leaks memory, allowing remote clients to trigger steady memory growth through repeated
+TLS connections. Over time this can lead to resource exhaustion and denial of service.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability was already fixed on Node.js 24.12.0. It has no impact on
+other active release lines.</li>
+</ul>
+<p>This public CVE is only issued for the affected 24.x releases.</p>
+<p>Thank you, to giant_anteater for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="nodejs-permission-model-bypass-via-unchecked-unix-domain-socket-connections-uds-cve-2026-21636---medium"><a href="#nodejs-permission-model-bypass-via-unchecked-unix-domain-socket-connections-uds-cve-2026-21636---medium">Node.js permission model bypass via unchecked Unix Domain Socket connections (UDS) (CVE-2026-21636) - (Medium)</a></h2>
+<p>A flaw in Node.js&#x27;s permission model allows Unix Domain Socket (UDS) connections to bypass network restrictions
+when <code>--permission</code> is enabled. Even without <code>--allow-net</code>, attacker-controlled inputs
+(such as URLs or socketPath options) can connect to arbitrary local sockets via net, tls, or undici/fetch.
+This breaks the intended security boundary of the permission model and enables access to privileged local services,
+potentially leading to privilege escalation, data exposure, or local code execution.</p>
+<p>In the moment of this vulnerability, network permissions (<code>--allow-net</code>) are still in the experimental phase.</p>
+<p>Impact:</p>
+<ul>
+<li>The issue affects users of the Node.js permission model on Node.js 25.x.</li>
+</ul>
+<p>Thank you, to mufeedvh for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="tls-pskalpn-callback-exceptions-bypass-error-handlers-causing-dos-and-fd-leak-cve-2026-21637---medium"><a href="#tls-pskalpn-callback-exceptions-bypass-error-handlers-causing-dos-and-fd-leak-cve-2026-21637---medium">TLS PSK/ALPN Callback Exceptions Bypass Error Handlers, Causing DoS and FD Leak (CVE-2026-21637) - (Medium)</a></h2>
+<p>A flaw in Node.js TLS error handling allows remote attackers to crash or exhaust resources of a TLS server when
+<code>pskCallback</code> or <code>ALPNCallback</code> are in use. Synchronous exceptions thrown during these callbacks bypass standard
+TLS error handling paths (tlsClientError and error), causing either immediate process termination or silent file
+descriptor leaks that eventually lead to denial of service. Because these callbacks process attacker-controlled
+input during the TLS handshake, a remote client can repeatedly trigger the issue.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects TLS servers using PSK or ALPN callbacks across Node.js versions where these callbacks
+throw without being safely wrapped.</li>
+</ul>
+<p>Thank you, to 0xmaxhax for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h2 id="fsfutimes-bypasses-read-only-permission-model-cve-2025-55132---low"><a href="#fsfutimes-bypasses-read-only-permission-model-cve-2025-55132---low">fs.futimes() Bypasses Read-Only Permission Model (CVE-2025-55132) - (Low)</a></h2>
+<p>A flaw in Node.js&#x27;s permission model allows a file&#x27;s access and modification timestamps to be changed
+via <code>futimes()</code> even when the process has only read permissions.</p>
+<p>Unlike <code>utimes()</code>, <code>futimes()</code> does not apply the expected write-permission checks, which means file
+metadata can be modified in read-only directories. This behavior could be used to alter timestamps in
+ways that obscure activity, reducing the reliability of logs.</p>
+<p>Impact:</p>
+<ul>
+<li>This vulnerability affects users of the permission model on Node.js 20.x, 22.x, 24.x, and 25.x.</li>
+</ul>
+<p>Thank you, to oriotie for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="downloads-and-release-details"><a href="#downloads-and-release-details">Downloads and release details</a></h2>
+<ul>
+<li><a href="/en/blog/release/v20.20.0/">Node.js 20.20.0</a></li>
+<li><a href="/en/blog/release/v22.22.0/">Node.js 22.22.0</a></li>
+<li><a href="/en/blog/release/v24.13.0/">Node.js 24.13.0</a></li>
+<li><a href="/en/blog/release/v25.3.0/">Node.js 25.3.0</a></li>
+</ul>
+<h1 id="summary"><a href="#summary">Summary</a></h1>
+<p>The Node.js project will release new versions of the 25.x, 24.x, 22.x, and 20.x
+releases lines on or shortly after, Monday, December 15, 2025 in order to address:</p>
+<ul>
+<li>3 high severity issues.</li>
+<li>1 low severity issue.</li>
+<li>1 medium severity issue.</li>
+</ul>
+<h2 id="impact"><a href="#impact">Impact</a></h2>
+<p>The 25.x release line of Node.js is vulnerable to 3 high severity issues, 1 low severity issue.
+The 24.x release line of Node.js is vulnerable to 3 high severity issues, 1 low severity issue, 1 medium severity issue.
+The 22.x release line of Node.js is vulnerable to 3 high severity issues, 1 low severity issue, 1 medium severity issue.
+The 20.x release line of Node.js is vulnerable to 3 high severity issues, 1 low severity issue, 1 medium severity issue.</p>
+<p>It&#x27;s important to note that End-of-Life versions are always affected when a security release occurs.
+To ensure your system&#x27;s security, please use an up-to-date version as outlined in our
+<a href="https://github.com/nodejs/release#release-schedule">Release Schedule</a>.</p>
+<h2 id="release-timing"><a href="#release-timing">Release timing</a></h2>
+<p>Releases will be available on, or shortly after, Monday, December 15, 2025.</p>
+<h2 id="contact-and-future-updates"><a href="#contact-and-future-updates">Contact and future updates</a></h2>
+<p>The current Node.js security policy can be found at <a href="https://nodejs.org/en/security/">https://nodejs.org/en/security/</a>.
+Please follow the process outlined in <a href="https://github.com/nodejs/node/blob/master/SECURITY.md">https://github.com/nodejs/node/blob/master/SECURITY.md</a> if you wish to report a vulnerability in Node.js.</p>
+<p>Subscribe to the low-volume announcement-only nodejs-sec mailing list at <a href="https://groups.google.com/forum/#!forum/nodejs-sec">https://groups.google.com/forum/#!forum/nodejs-sec</a> to stay up to date on security vulnerabilities and security-related releases of Node.js and the projects maintained in the nodejs GitHub organization.</p><div class="max-ml:grid-cols-1 mt-4 grid w-full grid-cols-2 gap-4"><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/january-2026-dos-mitigation-async-hooks"><span class="A9kfJq_header">Previous</span><span class="A9kfJq_content">Mitigating Denial-of-Service Vulnerability from Unrecoverable Stack Space Exhaustion for React, Next.js, and APM Users</span></a><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/july-2025-security-releases"><span class="A9kfJq_header A9kfJq_reverse">Next</span><span class="A9kfJq_content A9kfJq_reverse">Tuesday, July 15, 2025 Security Releases</span></a></div></main></div><aside class="_0yZVB</main></body></html>

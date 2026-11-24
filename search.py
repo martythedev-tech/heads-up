@@ -2,7 +2,7 @@
 
 The page filters the main list by itself; this finds the rest: every Microsoft
 CVE of the last three releases, the full CISA and VulnCheck lists, Fortinet
-advisories and the Exploit-DB / Metasploit index. A match that is already on the
+advisories, Node.js security releases and the Exploit-DB / Metasploit index. A match that is already on the
 main list is left out, so nothing appears twice.
 """
 import json
@@ -86,6 +86,21 @@ def search(db, q):
             e["cvss"] = e["cvss"] or r["cvss"]
             e["sources"].append("fn")
             e["notes"].append(f"Fortinet advisory from {r['published'] or r['feed_date']}.")
+    for r in _rows(db, "nodejs", ["slug", "title", "cves", "issues", "'Node.js nodejs'"], words, order=""):
+        if r["link"] in main_links:
+            continue
+        fixes = ", ".join(json.loads(r["fixes"] or "{}").values())
+        for issue in json.loads(r["issues"] or "[]"):
+            hay = " ".join([issue["title"], *issue["cves"], "node.js nodejs"]).lower()
+            if not all(w in hay for w in words):
+                continue
+            for c in issue["cves"]:
+                e = entry(c, issue["title"], r["link"])
+                e["product"] = e["product"] or "Node.js"
+                e["severity"] = e["severity"] or issue["severity"].upper()
+                e["sources"].append("nj")
+                e["notes"].append(f"Fixed in the Node.js security release of {r['published']}"
+                                  + (f" ({fixes})." if fixes else "."))
     for r in _rows(db, "exploit_index", ["cve", "edb", "msf"], words):
         entries = json.loads(r["msf"] or "[]") or json.loads(r["edb"] or "[]")
         entry(r["cve"], entries[0]["title"] if entries else None)

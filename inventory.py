@@ -3,12 +3,13 @@
 Each entry has a display name and the words that identify it in the feeds
 ("FortiGate" -> FortiGate, FortiOS). A word matches whole words only, case
 insensitive, against the product fields of each source (CISA/VulnCheck
-vendor and product, Microsoft product, Fortinet products, VMware products, TrueNAS, Ubuntu
+vendor and product, Microsoft product, Fortinet products, VMware products, Node.js, TrueNAS, Ubuntu
 packages, Cloudflare's title and topics), never against free text, so
 "Exchange" doesn't match a description that mentions "key exchange".
 The version box takes the versions you run, comma-separated ("7.4.8, 7.6.3"
 when boxes differ). Fortinet and TrueNAS advisories are checked against them
-(versions.py): an item every version you run is fixed for moves to Done.
+(versions.py), and so are Node.js security releases ("24.22.2"): an item
+every version you run is fixed for moves to Done.
 For Microsoft products the box takes the month you're patched through
 ("2026-11"), compared with the Patch Tuesday that fixed each CVE.
 Other sources don't publish fixed versions in a usable form, so for them it
@@ -96,6 +97,8 @@ def product_text(it):
         parts = ["Fortinet", *(extra.get("products") or tags)]
     elif src == "vmsa":
         parts = ["VMware", *(extra.get("products") or tags)]
+    elif src == "nodejs":
+        parts = ["Node.js", "nodejs"]
     elif src == "truenas":
         parts = [] if extra.get("level") == "none" else ["TrueNAS"]   # TrueNAS says it's not affected
     elif src == "ubuntu":
@@ -122,6 +125,8 @@ def suggestions(items, limit=400):
             c.update(extra.get("products") or [])
         elif src == "vmsa":
             c.update(extra.get("products") or [])
+        elif src == "nodejs":
+            c["Node.js"] += 1
         elif src == "truenas":
             c["TrueNAS"] += 1
     return [n for n, _ in c.most_common(limit) if 2 <= len(n) <= 60]

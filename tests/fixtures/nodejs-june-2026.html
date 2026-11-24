@@ -1,0 +1,89 @@
+<!doctype html><html><body><main><h1>Thursday, June 18, 2026 Security Releases</h1><section><div class="mLkwoq_avatarGroup mLkwoq_medium"><span class="j-1Igq_avatar j-1Igq_medium cursor-pointer" data-state="closed"><a href="https://github.com/nodejs" target="_blank" class="j-1Igq_wrapper"><span class="j-1Igq_item j-1Igq_medium">TNJP</span></a></span></div><p>The Node.js Project</p></section><div class="pL4wLa_root pL4wLa_vulnerability"><div class="pL4wLa_container" aria-hidden="true">Thursday, June 18, 2026 Security Releases</div></div><h2 id="update-2026-06-18-security-releases-available"><a href="#update-2026-06-18-security-releases-available">(UPDATE 2026-06-18) Security releases available</a></h2>
+<p>Updates are now available for the 26.x, 24.x, 22.x Node.js release lines for the
+following issues.</p>
+<p>This security release includes the following dependency updates to address public vulnerabilities:</p>
+<ul>
+<li>llhttp (9.4.2) on all release lines</li>
+<li>nghttp2 (1.69.0) on all release lines</li>
+<li>openssl (3.5.7) on all release lines</li>
+<li>undici (8.5.0) on 26.3.1</li>
+<li>undici (7.28.0) on 24.17.0</li>
+<li>undici (6.27.0) on 22.23.0</li>
+</ul>
+<h2 id="nodejs-webcrypto-aes-integer-overflow-leads-to-remote-process-abort-dos-cve-2026-48933---high"><a href="#nodejs-webcrypto-aes-integer-overflow-leads-to-remote-process-abort-dos-cve-2026-48933---high">Node.js WebCrypto AES Integer Overflow Leads to Remote Process Abort (DoS) (CVE-2026-48933) - (high)</a></h2>
+<p>A flaw in Node.js WebCrypto implementation can crash the process if the input of <code>subtle.encrypt()</code> is a multiple of 2GiB.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to erichen for reporting this vulnerability and thank you Filip Skokan for fixing it.</p>
+<h2 id="nodejs-unicode-dot-separator-handling-can-lead-to-tls-wildcard-depth-authentication-bypass-due-to-resolver-and-verifier-hostname-normalization-mismatch-cve-2026-48618---high"><a href="#nodejs-unicode-dot-separator-handling-can-lead-to-tls-wildcard-depth-authentication-bypass-due-to-resolver-and-verifier-hostname-normalization-mismatch-cve-2026-48618---high">Node.js unicode dot separator handling can lead to tls wildcard-depth authentication bypass due to resolver and verifier hostname normalization mismatch (CVE-2026-48618) - (high)</a></h2>
+<p>A flaw in Node.js TLS hostname handling can cause Node.js unicode dot separator handling can lead to tls wildcard-depth authentication bypass due to resolver and verifier hostname normalization mismatch.</p>
+<p>This can lead to confidentiality impact or bypass of the intended security boundary under affected configurations.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to tmeletlidis for reporting this vulnerability and thank you Matteo Collina for fixing it.</p>
+<h2 id="proxy-credentials-leaked-in-err_proxy_tunnel-error-message-cve-2026-48615---medium"><a href="#proxy-credentials-leaked-in-err_proxy_tunnel-error-message-cve-2026-48615---medium">Proxy credentials leaked in ERR_PROXY_TUNNEL error message (CVE-2026-48615) - (medium)</a></h2>
+<p>A flaw in Node.js proxy tunnel error handling could expose proxy credentials in <code>ERR_PROXY_TUNNEL</code> error messages.</p>
+<p>When proxy credentials are embedded in the proxy URL, they may be exposed through error handling paths and captured by logs, diagnostics, or other error consumers.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to nssys for reporting this vulnerability and thank you Matteo Collina for fixing it.</p>
+<h2 id="permission-model-bypass-via-processreportwritereport-path-misvalidation-cve-2026-48617---low"><a href="#permission-model-bypass-via-processreportwritereport-path-misvalidation-cve-2026-48617---low">Permission Model Bypass via <code>process.report.writeReport()</code> Path Misvalidation (CVE-2026-48617) - (low)</a></h2>
+<p>A flaw in Node.js Permission Model enforcement allows Bypass via <code>process.report.writeReport()</code> Path Misvalidation.</p>
+<p>This can lead to confidentiality impact or bypass of the intended security boundary under affected configurations.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to suul for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="unbounded-memory-growth-in-nodehttp2-clients-via-attacker-controlled-origin-frames-cve-2026-48619---medium"><a href="#unbounded-memory-growth-in-nodehttp2-clients-via-attacker-controlled-origin-frames-cve-2026-48619---medium">Unbounded memory growth in <code>node:http2</code> clients via attacker-controlled ORIGIN frames (CVE-2026-48619) - (medium)</a></h2>
+<p>A flaw in Node.js HTTP/2 client allows a server to send an unlimited number of ORIGIN frames, which could lead to an Out of Memory error on the client.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to kingsd for reporting this vulnerability and thank you Matteo Collina for fixing it.</p>
+<h2 id="http2-sessions-never-clean-up-after-goaway-on-invalid-protocol-errors-cve-2026-48937---medium"><a href="#http2-sessions-never-clean-up-after-goaway-on-invalid-protocol-errors-cve-2026-48937---medium">HTTP/2 sessions never clean up after GOAWAY on invalid protocol errors (CVE-2026-48937) - (medium)</a></h2>
+<p>A flaw in Node.js HTTP/2 server API can cause servers to keep accepting data even after sending a <code>GOAWAY</code> frame.</p>
+<p>This vulnerability affects two supported release lines: <strong>Node.js 22</strong> and <strong>Node.js 24</strong>.</p>
+<p>Thank you, Tim Perry, for reporting this vulnerability and for fixing it.</p>
+<h2 id="uppercase-sni-context-matching-can-lead-to-mtls-authorization-bypass-due-to-case-sensitive-hostname-matching-cve-2026-48928---medium"><a href="#uppercase-sni-context-matching-can-lead-to-mtls-authorization-bypass-due-to-case-sensitive-hostname-matching-cve-2026-48928---medium">Uppercase sni context matching can lead to mtls authorization bypass due to case-sensitive hostname matching (CVE-2026-48928) - (medium)</a></h2>
+<p>A inconsistency in Node.js hostname matching can cause a trust-policy bypass in multi-context mTLS setups.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to tmeletlidis for reporting this vulnerability and thank you Matteo Collina for fixing it.</p>
+<h2 id="embedded-nul-hostnames-can-lead-to-silent-authority-rebinding-due-to-c-string-truncation-in-resolver-bindings-cve-2026-48930---medium"><a href="#embedded-nul-hostnames-can-lead-to-silent-authority-rebinding-due-to-c-string-truncation-in-resolver-bindings-cve-2026-48930---medium">Embedded-nul hostnames can lead to silent authority rebinding due to c-string truncation in resolver bindings (CVE-2026-48930) - (medium)</a></h2>
+<p>A flaw in Node.js TLS hostname handling can cause Embedded-nul hostnames can lead to silent authority rebinding due to c-string truncation in resolver bindings.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to tmeletlidis for reporting this vulnerability and thank you Matteo Collina for fixing it.</p>
+<h2 id="tls-host-identity-verification-bypass-via-session-reuse-with-different-servername-leads-to-unauthorized-connections-cve-2026-48934---medium"><a href="#tls-host-identity-verification-bypass-via-session-reuse-with-different-servername-leads-to-unauthorized-connections-cve-2026-48934---medium">TLS host identity verification bypass via session reuse with different servername leads to unauthorized connections (CVE-2026-48934) - (medium)</a></h2>
+<p>A flaw in Node.js TLS host verification can cause an attacker to bypass certification validation.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to 3d7omb for reporting this vulnerability and thank you Matteo Collina for fixing it.</p>
+<h2 id="permission-model-bypass-via-filehandleutimes-in-the-promises-api-cve-2026-48935---low"><a href="#permission-model-bypass-via-filehandleutimes-in-the-promises-api-cve-2026-48935---low">Permission Model bypass via FileHandle.utimes() in the promises API (CVE-2026-48935) - (low)</a></h2>
+<p>A flaw in Node.js Permission API can cause a file metadata to be modified even on a path that was set as read-only with e.g. <code>--allow-fs-read</code>.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to muhammaddaffa for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="unix-domain-socket-server-bypasses---permission-network-restrictions-incomplete-cve-2026-21636-fix-cve-2026-48936---low"><a href="#unix-domain-socket-server-bypasses---permission-network-restrictions-incomplete-cve-2026-21636-fix-cve-2026-48936---low">Unix domain socket server bypasses --permission network restrictions (incomplete CVE-2026-21636 fix) (CVE-2026-48936) - (low)</a></h2>
+<p>A flaw in Node.js Permission API can cause a local server to be started (via a Unix domain socket), even without the <code>--allow-net</code> permission.</p>
+<p>This vulnerability affects one supported release line: <strong>Node.js 26</strong>.</p>
+<p>Thank you, to Vitaly Simonovich for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="http-response-queue-poisoning-via-toctou-race-condition-in-httpagent-cve-2026-48931---low"><a href="#http-response-queue-poisoning-via-toctou-race-condition-in-httpagent-cve-2026-48931---low">HTTP Response Queue Poisoning via TOCTOU Race Condition in <code>http.Agent</code> (CVE-2026-48931) - (low)</a></h2>
+<p>A flaw in Node.js HTTP Agent can cause a client to accept as valid a response that is send before the client has sent the request.</p>
+<p>This vulnerability affects all supported release lines: <strong>Node.js 22</strong>, <strong>Node.js 24</strong>, and <strong>Node.js 26</strong>.</p>
+<p>Thank you, to yushengchen for reporting this vulnerability and thank you Matteo Collina for fixing it.</p>
+<h2 id="downloads-and-release-details"><a href="#downloads-and-release-details">Downloads and release details</a></h2>
+<ul>
+<li><a href="/en/blog/release/v22.23.0/">Node.js v22.23.0</a></li>
+<li><a href="/en/blog/release/v24.17.0/">Node.js v24.17.0</a></li>
+<li><a href="/en/blog/release/v26.3.1/">Node.js v26.3.1</a></li>
+</ul>
+<h1 id="summary"><a href="#summary">Summary</a></h1>
+<p>The Node.js project will release new versions of the 26.x, 24.x, 22.x
+releases lines on or shortly after, Wednesday, June 17, 2026 in order
+to address one or more security issues, the highest severity is HIGH.</p>
+<h2 id="impact"><a href="#impact">Impact</a></h2>
+<p>The highest severity issue fixed in the 26.x release line is HIGH.
+The highest severity issue fixed in the 24.x release line is HIGH.
+The highest severity issue fixed in the 22.x release line is HIGH.</p>
+<p>It&#x27;s important to note that End-of-Life versions are always affected when a security release occurs.
+To ensure your system&#x27;s security, please use an up-to-date version as outlined in our
+<a href="https://github.com/nodejs/release#release-schedule">Release Schedule</a>.</p>
+<h2 id="release-timing"><a href="#release-timing">Release timing</a></h2>
+<p>Releases are available as of Thursday, June 18, 2026.</p>
+<h2 id="contact-and-future-updates"><a href="#contact-and-future-updates">Contact and future updates</a></h2>
+<p>The current Node.js security policy can be found at <a href="https://nodejs.org/en/security/">https://nodejs.org/en/security/</a>.
+Please follow the process outlined in <a href="https://github.com/nodejs/node/blob/master/SECURITY.md">https://github.com/nodejs/node/blob/master/SECURITY.md</a> if
+you wish to report a vulnerability in Node.js.</p>
+<p>Subscribe to the low-volume announcement-only nodejs-sec mailing list at
+<a href="https://groups.google.com/forum/#!forum/nodejs-sec">https://groups.google.com/forum/#!forum/nodejs-sec</a> to stay up to date on security vulnerabilities
+and security-related releases of Node.js and the projects maintained in the nodejs GitHub organization.</p><div class="max-ml:grid-cols-1 mt-4 grid w-full grid-cols-2 gap-4"><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/july-2026-security-releases"><span class="A9kfJq_header">Previous</span><span class="A9kfJq_content">Wednesday, July 29, 2026 Security Releases</span></a><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/march-2026-hashdos"><span class="A9kfJq_header A9kfJq_reverse">Next</span><span class="A9kfJq_content A9kfJq_reverse">Developing a minimally HashDoS resistant, yet quickly reversible integer hash for V8</span></a></div></main></div><aside class="_0yZVBa_wrapper" aria-label="Article metadata"><dl><dt>Last</main></body></html>

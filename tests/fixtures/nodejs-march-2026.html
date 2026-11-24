@@ -1,0 +1,97 @@
+<!doctype html><html><body><main><h1>Tuesday, March 24, 2026 Security Releases</h1><section><div class="mLkwoq_avatarGroup mLkwoq_medium"><span class="j-1Igq_avatar j-1Igq_medium cursor-pointer" data-state="closed"><a href="https://github.com/nodejs" target="_blank" class="j-1Igq_wrapper"><span class="j-1Igq_item j-1Igq_medium">TNJP</span></a></span></div><p>The Node.js Project</p></section><div class="pL4wLa_root pL4wLa_vulnerability"><div class="pL4wLa_container" aria-hidden="true">Tuesday, March 24, 2026 Security Releases</div></div><h2 id="security-releases-available"><a href="#security-releases-available">Security releases available</a></h2>
+<p>Updates are now available for the 25.x, 24.x, 22.x, 20.x Node.js release lines for the
+following issues.</p>
+<p>This security release includes the following dependency updates to address public vulnerabilities:</p>
+<ul>
+<li>undici (6.24.1, 7.24.4) on 22.x, 24.x, 25.x</li>
+</ul>
+<h2 id="incomplete-fix-for-cve-2026-21637-loadsni-in-_tls_wrapjs-lacks-trycatch-leading-to-remote-dos-cve-2026-21637---high"><a href="#incomplete-fix-for-cve-2026-21637-loadsni-in-_tls_wrapjs-lacks-trycatch-leading-to-remote-dos-cve-2026-21637---high">Incomplete fix for CVE-2026-21637: <code>loadSNI()</code> in <code>_tls_wrap.js</code> lacks <code>try</code>/<code>catch</code> leading to Remote DoS (CVE-2026-21637) - (High)</a></h2>
+<p>A flaw in Node.js TLS error handling leaves <code>SNICallback</code> invocations unprotected against synchronous exceptions, while the equivalent ALPN and PSK callbacks were already addressed in CVE-2026-21637. This represents an incomplete fix of that prior vulnerability.</p>
+<p>When an <code>SNICallback</code> throws synchronously on unexpected input the exception bypasses TLS error handlers and propagates as an uncaught exception, crashing the Node.js process.</p>
+<ul>
+<li>This vulnerability affects all Node.js versions that received the CVE-2026-21637 fix, including <strong>20.x, 22.x, 24.x, and 25.x</strong>, on any TLS server where <code>SNICallback</code> may throw on unexpected <code>servername</code> input.</li>
+</ul>
+<p>Thank you, to mbarbs for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h2 id="denial-of-service-via-__proto__-header-name-in-reqheadersdistinct-uncaught-typeerror-crashes-nodejs-process-cve-2026-21710---high"><a href="#denial-of-service-via-__proto__-header-name-in-reqheadersdistinct-uncaught-typeerror-crashes-nodejs-process-cve-2026-21710---high">Denial of Service via <code>__proto__</code> header name in <code>req.headersDistinct</code> (Uncaught <code>TypeError</code> crashes Node.js process) (CVE-2026-21710) - (High)</a></h2>
+<p>A flaw in Node.js HTTP request handling causes an uncaught <code>TypeError</code> when a request is received with a header named <code>__proto__</code> and the application accesses <code>req.headersDistinct</code>.</p>
+<p>When this occurs, <code>dest[&quot;__proto__&quot;]</code> resolves to <code>Object.prototype</code> rather than <code>undefined</code>, causing <code>.push()</code> to be called on a non-array. This exception is thrown synchronously inside a property getter and cannot be intercepted by <code>error</code> event listeners, meaning it cannot be handled without wrapping every <code>req.headersDistinct</code> access in a <code>try/catch</code>.</p>
+<ul>
+<li>This vulnerability affects all Node.js HTTP servers on <strong>20.x, 22.x, 24.x, and v25.x</strong></li>
+</ul>
+<p>Thank you, to yushengchen for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h2 id="nodejs-permission-model-bypass-uds-server-bindlisten-works-without---allow-net-cve-2026-21711---medium"><a href="#nodejs-permission-model-bypass-uds-server-bindlisten-works-without---allow-net-cve-2026-21711---medium">Node.js Permission Model bypass: UDS server bind/listen works without <code>--allow-net</code> (CVE-2026-21711) - (Medium)</a></h2>
+<p>A flaw in Node.js Permission Model network enforcement leaves Unix Domain Socket (UDS) server operations without the required permission checks, while all comparable network paths correctly enforce them.</p>
+<p>As a result, code running under <code>--permission</code> without <code>--allow-net</code> can create and expose local IPC endpoints, allowing communication with other processes on the same host outside of the intended network restriction boundary.</p>
+<ul>
+<li>This vulnerability affects Node.js <strong>25.x</strong> processes using the Permission Model where <code>--allow-net</code> is intentionally omitted to restrict network access. Note that <code>--allow-net</code> is currently an experimental feature.</li>
+</ul>
+<p>Thank you, to xavlimsg for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="assertion-error-in-node_urlcc-via-malformed-url-format-leads-to-nodejs-crash-cve-2026-21712---medium"><a href="#assertion-error-in-node_urlcc-via-malformed-url-format-leads-to-nodejs-crash-cve-2026-21712---medium">Assertion error in <code>node_url.cc</code> via malformed URL format leads to Node.js crash (CVE-2026-21712) - (Medium)</a></h2>
+<p>A flaw in Node.js URL processing causes an assertion failure in native code when <code>url.format()</code> is called with a malformed internationalized domain name (IDN) containing invalid characters, crashing the Node.js process.</p>
+<ul>
+<li>This vulnerability affects <strong>24.x and 25.x</strong>.</li>
+</ul>
+<p>Thank you, to wooffie for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="timing-side-channel-in-hmac-verification-via-memcmp-in-crypto_hmaccc-leads-to-potential-mac-forgery-cve-2026-21713---medium"><a href="#timing-side-channel-in-hmac-verification-via-memcmp-in-crypto_hmaccc-leads-to-potential-mac-forgery-cve-2026-21713---medium">Timing side-channel in HMAC verification via <code>memcmp()</code> in <code>crypto_hmac.cc</code> leads to potential MAC forgery (CVE-2026-21713) - (Medium)</a></h2>
+<p>A flaw in Node.js HMAC verification uses a non-constant-time comparison when validating user-provided signatures, potentially leaking timing information proportional to the number of matching bytes. Under certain threat models where high-resolution timing measurements are possible, this behavior could be exploited as a timing oracle to infer HMAC values.</p>
+<p>Node.js already provides timing-safe comparison primitives used elsewhere in the codebase, indicating this is an oversight rather than an intentional design decision.</p>
+<ul>
+<li>This vulnerability affects <strong>20.x, 22.x, 24.x, and 25.x</strong>.</li>
+</ul>
+<p>Thank you, to x_probe for reporting this vulnerability and thank you panva for fixing it.</p>
+<h2 id="memory-leak-in-nodejs-http2-server-via-window_update-on-stream-0-leads-to-resource-exhaustion-cve-2026-21714---medium"><a href="#memory-leak-in-nodejs-http2-server-via-window_update-on-stream-0-leads-to-resource-exhaustion-cve-2026-21714---medium">Memory leak in Node.js HTTP/2 server via <code>WINDOW_UPDATE</code> on stream 0 leads to resource exhaustion (CVE-2026-21714) - (Medium)</a></h2>
+<p>A memory leak occurs in Node.js HTTP/2 servers when a client sends <code>WINDOW_UPDATE</code> frames on stream 0 (connection-level) that cause the flow control window to exceed the maximum value of 2³¹-1. The server correctly sends a GOAWAY frame, but the Http2Session object is never cleaned up.</p>
+<ul>
+<li>This vulnerability affects HTTP2 users on Node.js 20, 22, 24 and 25.</li>
+</ul>
+<p>Thank you, to galbarnahum for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="hashdos-in-v8-cve-2026-21717---medium"><a href="#hashdos-in-v8-cve-2026-21717---medium">HashDoS in V8 (CVE-2026-21717) - (Medium)</a></h2>
+<p>A flaw in V8&#x27;s string hashing mechanism causes integer-like strings to be hashed to their numeric value, making hash collisions trivially predictable. By crafting a request that causes many such collisions in V8&#x27;s internal string table, an attacker can significantly degrade performance of the Node.js process.</p>
+<p>The most common trigger is any endpoint that calls <code>JSON.parse()</code> on attacker-controlled input, as JSON parsing automatically internalizes short strings into the affected hash table.</p>
+<ul>
+<li>This vulnerability affects <strong>20.x, 22.x, 24.x, and 25.x</strong>.</li>
+</ul>
+<p>Thank you, to sharp_edged for reporting this vulnerability and thank you joyeecheung for fixing it.</p>
+<h2 id="permission-model-bypass-in-realpathsyncnative-allows-file-existence-disclosure-cve-2026-21715---low"><a href="#permission-model-bypass-in-realpathsyncnative-allows-file-existence-disclosure-cve-2026-21715---low">Permission Model Bypass in realpathSync.native Allows File Existence Disclosure (CVE-2026-21715) - (Low)</a></h2>
+<p>A flaw in Node.js Permission Model filesystem enforcement leaves <code>fs.realpathSync.native()</code> without the required read permission checks, while all comparable filesystem functions correctly enforce them.</p>
+<p>As a result, code running under <code>--permission</code> with restricted <code>--allow-fs-read</code> can still use <code>fs.realpathSync.native()</code> to check file existence, resolve symlink targets, and enumerate filesystem paths outside of permitted directories.</p>
+<ul>
+<li>This vulnerability affects <strong>20.x, 22.x, 24.x, and 25.x</strong> processes using the Permission Model where <code>--allow-fs-read</code> is intentionally restricted.</li>
+</ul>
+<p>Thank you, to stif for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="cve-2024-36137-patch-bypass---filehandlechmodchown-cve-2026-21716---low"><a href="#cve-2024-36137-patch-bypass---filehandlechmodchown-cve-2026-21716---low">CVE-2024-36137 Patch Bypass - FileHandle.chmod/chown (CVE-2026-21716) - (Low)</a></h2>
+<p>An incomplete fix for CVE-2024-36137 leaves <code>FileHandle.chmod()</code> and <code>FileHandle.chown()</code> in the promises API without the required permission checks, while their callback-based equivalents (<code>fs.fchmod()</code>, <code>fs.fchown()</code>) were correctly patched.</p>
+<p>As a result, code running under <code>--permission</code> with restricted <code>--allow-fs-write</code> can still use promise-based <code>FileHandle</code> methods to modify file permissions and ownership on already-open file descriptors, bypassing the intended write restrictions.</p>
+<ul>
+<li>This vulnerability affects <strong>20.x, 22.x, 24.x, and 25.x</strong> processes using the Permission Model where <code>--allow-fs-write</code> is intentionally restricted.</li>
+</ul>
+<p>Thank you, to wooseokdotkim for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="downloads-and-release-details"><a href="#downloads-and-release-details">Downloads and release details</a></h2>
+<ul>
+<li><a href="/en/blog/release/v20.20.2/">Node.js v20.20.2</a></li>
+<li><a href="/en/blog/release/v22.22.2/">Node.js v22.22.2</a></li>
+<li><a href="/en/blog/release/v24.14.1/">Node.js v24.14.1</a></li>
+<li><a href="/en/blog/release/v25.8.2/">Node.js v25.8.2</a></li>
+</ul>
+<h1 id="summary"><a href="#summary">Summary</a></h1>
+<p>The Node.js project will release new versions of the 25.x, 24.x, 22.x, 20.x
+releases lines on or shortly after, Tuesday, March 24, 2026 in order to address:</p>
+<ul>
+<li>2 high severity issues.</li>
+<li>5 medium severity issues.</li>
+<li>2 low severity issues.</li>
+</ul>
+<h2 id="impact"><a href="#impact">Impact</a></h2>
+<p>The 25.x release line of Node.js is vulnerable to 2 high severity issues, 5 medium severity issues, 2 low severity issues.
+The 24.x release line of Node.js is vulnerable to 2 high severity issues, 4 medium severity issues, 2 low severity issues.
+The 22.x release line of Node.js is vulnerable to 2 high severity issues, 4 medium severity issues, 2 low severity issues.
+The 20.x release line of Node.js is vulnerable to 2 high severity issues, 4 medium severity issues, 2 low severity issues.</p>
+<p>It&#x27;s important to note that End-of-Life versions are always affected when a security release occurs.
+To ensure your system&#x27;s security, please use an up-to-date version as outlined in our
+<a href="https://github.com/nodejs/release#release-schedule">Release Schedule</a>.</p>
+<h2 id="release-timing"><a href="#release-timing">Release timing</a></h2>
+<p>Releases will be available on, or shortly after, Tuesday, March 24, 2026.</p>
+<h2 id="contact-and-future-updates"><a href="#contact-and-future-updates">Contact and future updates</a></h2>
+<p>The current Node.js security policy can be found at <a href="https://nodejs.org/en/security/">https://nodejs.org/en/security/</a>.
+Please follow the process outlined in <a href="https://github.com/nodejs/node/blob/master/SECURITY.md">https://github.com/nodejs/node/blob/master/SECURITY.md</a> if you wish to report a vulnerability in Node.js.</p>
+<p>Subscribe to the low-volume announcement-only nodejs-sec mailing list at <a href="https://groups.google.com/forum/#!forum/nodejs-sec">https://groups.google.com/forum/#!forum/nodejs-sec</a> to stay up to date on security vulnerabilities and security-related releases of Node.js and the projects maintained in the nodejs GitHub organization.</p><div class="max-ml:grid-cols-1 mt-4 grid w-full grid-cols-2 gap-4"><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/march-2026-hashdos"><span class="A9kfJq_header">Previous</span><span class="A9kfJq_content">Developing a minimally HashDoS resistant, yet quickly reversible integer hash for V8</span></a><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/openssl-fixes-in-regular-releases-jan2026"><span class="A9kfJq_header A9kfJq_reverse">Next</span><span class="A9kfJq_content A9kfJq_reverse">OpenSSL Security Advisory Assessment, January 2026</span></a></div></main></div><aside class="_0yZVBa_wrapper" aria-label="Article </main></body></html>

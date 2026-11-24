@@ -19,6 +19,7 @@ WATCHED = {
     "truenas": ("TrueNAS", 6 * HOUR, True),
     "fortinet": ("Fortinet", 6 * HOUR, True),
     "vmsa": ("VMware advisories (Broadcom)", 3 * HOUR, True),
+    "nodejs": ("Node.js security releases", 3 * HOUR, True),
     "exploits": ("Exploit-DB and Metasploit", 24 * HOUR, True),
     "epss": ("exploit chance (FIRST)", HOUR, True),
     "radar": ("Cloudflare Radar", HOUR, True),

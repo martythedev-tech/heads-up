@@ -16,6 +16,7 @@ const SOURCES = {
   tn: { name: "TrueNAS", what: "iXsystems' advisories, and how much wider CVEs (kernel, Samba, ...) matter on TrueNAS.", feeds: ["truenas"], url: "https://security.truenas.com/", stale: 8 * 3600 },
   fn: { name: "Fortinet", what: "Fortinet PSIRT advisories for your products ({products}), with fixed versions.", feeds: ["fortinet"], url: "https://www.fortiguard.com/psirt", stale: 8 * 3600 },
   vm: { name: "VMware (Broadcom)", what: "Broadcom's VMware security advisories (VMSAs), often days before the CVE records, with fixed versions for vCenter and ESXi.", feeds: ["vmsa"], url: "https://support.broadcom.com/web/ecx/security-advisory?segment=VC", stale: 8 * 3600 },
+  nj: { name: "Node.js", what: "The Node.js project's security releases: announced about a week ahead, then the issues and fixed versions per release line.", feeds: ["nodejs"], url: "https://nodejs.org/en/blog/vulnerability", stale: 8 * 3600 },
   ex: { name: "Exploit code", what: "Public attack code: Metasploit modules, Exploit-DB and proof-of-concepts on GitHub.", feeds: ["exploits", "poc"], url: "https://www.exploit-db.com", stale: 26 * 3600 },
 };
 const GROUPS = {
@@ -96,8 +97,9 @@ function buildVulns() {
     v.tns = (src.tnIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.fns = (src.fnIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.vms = (src.vmIds || []).map((id) => byId.get(id)).filter(Boolean);
+    v.njs = (src.njIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.cveList = v.primary.cves || [];
-    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms, ...v.vcs, ...v.tns, ...v.fns, ...v.vms].filter(Boolean);
+    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms, ...v.vcs, ...v.tns, ...v.fns, ...v.vms, ...v.njs].filter(Boolean);
     v.isNew = v.items.some(isNew);
     v.done = v.group === "done";
     v.why = src.why.map(([t, bold]) => (bold ? `<b>${esc(t)}</b>` : esc(t))).join("");
@@ -145,7 +147,7 @@ function severityClass(severity) {
 }
 
 function moreRow(e) {
-  const source = { ms: ["ms", "Microsoft"], cisa: ["cisa", "CISA"], vc: ["vc", "VulnCheck KEV"], fn: ["fn", "Fortinet"] };
+  const source = { ms: ["ms", "Microsoft"], cisa: ["cisa", "CISA"], vc: ["vc", "VulnCheck KEV"], fn: ["fn", "Fortinet"], nj: ["nj", "Node.js"] };
   const code = e.exploitCode || {};
   const badges = e.sources.map((s) => `<span class="badge ${source[s][0]}">${source[s][1]}</span>`);
   if (code.msf) badges.push(`<span class="badge ex">Metasploit</span>`);
@@ -201,6 +203,7 @@ function badges(v) {
     b.push(`<span class="badge fn">Fortinet <span class="detail">${detail}</span></span>`);
   }
   if (v.vmsa) b.push(`<span class="badge vm">VMware <span class="detail">${v.vmsa.exploited ? "exploited" : esc(v.vmsa.rev || v.vmsa.id)}</span></span>`);
+  if (v.nodejs) b.push(`<span class="badge nj">Node.js <span class="detail">${v.nodejs.status === "upcoming" ? "release coming" : esc(v.nodejs.highest || "release")}</span></span>`);
   if (v.truenas) b.push(`<span class="badge tn">TrueNAS <span class="detail">${v.truenas.level === "none" ? "not affected" : v.truenas.rating ? `impact ${esc(v.truenas.rating.toLowerCase())}` : "notice"}</span></span>`);
   if (v.exploit) b.push(`<span class="badge ex">${{ metasploit: "Metasploit", exploitdb: "Exploit-DB", poc: "GitHub" }[v.exploit]} <span class="detail">${v.exploit === "poc" ? "proof of concept" : "exploit"}</span></span>`);
   if (v.ubuntu.fixed.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix out</span></span>`);
@@ -468,6 +471,35 @@ function vmBox(v) {
   }).join("");
 }
 
+function njBox(v) {
+  // the release attached to this entry, then the release that fixed one of its CVEs
+  const pages = new Map();
+  for (const i of v.njs) pages.set(i.extra.id, i.extra);
+  for (const c of v.cveList) if (c.nodejs && !pages.has(c.nodejs.id)) pages.set(c.nodejs.id, c.nodejs);
+  if (!pages.size) return "";
+  const rank = { critical: 3, high: 2, medium: 1, low: 0 };
+  const cls = { critical: "crit", high: "high", medium: "med", low: "none" };
+  return [...pages.values()].slice(0, 2).map((r) => {
+    const issues = (r.issues || []).slice().sort((a, b) => (rank[b.severity] ?? -1) - (rank[a.severity] ?? -1));
+    const shown = issues.slice(0, 10);
+    const fixes = Object.entries(r.fixes || {});
+    const eol = r.recentEol || [];
+    const counts = ["critical", "high", "medium", "low"].filter((s) => r.counts?.[s]).map((s) => `${r.counts[s]} ${s}`).join(", ");
+    const upcoming = r.status === "upcoming";
+    return `<div class="box src-nj"><h4><span class="badge nj">Node.js</span> ${upcoming ? "security releases announced" : "security release"} · ${esc(day(r.published))}</h4>
+    <div class="kv">
+      <span class="k">Release</span><span><a href="${esc(r.link)}" target="_blank" rel="noopener">${esc(r.title || r.id)}</a></span>
+      ${counts ? `<span class="k">Issues</span><span><b class="v ${cls[r.highest] || "none"}">${esc(counts)}</b></span>` : ""}
+      ${upcoming ? `<span class="k">Due</span><span>on or shortly after ${esc(day(r.published))}, for ${(r.lines || []).map((m) => `${m}.x`).join(", ")}</span>` : ""}
+      ${fixes.length ? `<span class="k">Fixed in</span><span><ul class="small plain fn-fixes">${fixes.map(([m, ver]) => `<li>${esc(m)}.x: <b>${esc(ver)}</b></li>`).join("")}${eol.length ? `<li class="muted">${eol.map((m) => `${esc(m)}.x`).join(", ")}: end-of-life, no fix</li>` : ""}</ul></span>` : ""}
+      ${r.issue ? `<span class="k">This CVE</span><span>${esc(r.issue)}${r.severity ? ` (${esc(r.severity)})` : ""}${r.affects?.length ? `, on ${r.affects.map((m) => `${m}.x`).join(", ")}` : ""}</span>` : ""}
+      ${r.deps?.length ? `<span class="k">Dependencies</span><span class="small">${r.deps.map(esc).join("; ")}</span>` : ""}
+    </div>
+    ${shown.length ? `<ul class="small plain vm-sections">${shown.map((i) => `<li><b class="v ${cls[i.severity] || "none"}">${esc(i.severity)}</b> ${esc(i.title)} <span class="muted">${esc(i.cves.join(", "))}${i.lines?.length ? ` · ${i.lines.map((m) => `${m}.x`).join(", ")}` : ""}</span></li>`).join("")}${issues.length > shown.length ? `<li class="muted">+${issues.length - shown.length} more in the release notes</li>` : ""}</ul>` : ""}
+    <p class="small muted">${upcoming ? "The Node.js project publishes the issues and fixed versions on release day." : "The release notes describe each issue and who it affects."}</p></div>`;
+  }).join("");
+}
+
 function tnBox(v) {
   // pages attached to this entry, then pages that mention one of its CVEs
   const pages = new Map();
@@ -567,7 +599,7 @@ function renderDrawer(id, keepScroll) {
       <h3>${esc(v.title)}</h3>
       <p class="d-why">${v.why}</p>
     </div>
-    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${vcBox(v)}${msBox(v)}${fnBox(v)}${vmBox(v)}${tnBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
+    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${vcBox(v)}${msBox(v)}${fnBox(v)}${vmBox(v)}${njBox(v)}${tnBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
   drawer.hidden = false;
   $("#scrim").hidden = false;
   if (keepScroll) drawer.scrollTop = scroll;
@@ -645,6 +677,7 @@ const EVENT_HELP = {
   routing: "A route hijack or leak involves one of the networks you watch (set under Cloudflare Radar).",
   fortinet: "Fortinet publishes advisories for your Fortinet products (or says one is exploited): one message per batch with scores and fixed versions.",
   vmware: "Broadcom publishes a new VMware security advisory (VMSA): its worst issues and scores, and which of your products it names.",
+  nodejs: "The Node.js project announces security releases (about a week ahead), then again when they're out: severities, fixed versions, and what that means for the Node.js versions you run.",
   truenas: "iXsystems publishes a new TrueNAS advisory or impact statement: its TrueNAS rating, fix version and what to do.",
 };
 
@@ -819,7 +852,7 @@ function invFormBox(e) {
     <p class="help small">Whole words, any case, matched against product names only (not descriptions). FortiGate shows up as <b>FortiOS</b> in Fortinet's and CISA's lists, so use “FortiGate, FortiOS”.</p>
     <div class="inv-preview" id="inv-preview"></div>
     <label>Versions we run (optional)<input name="version" maxlength="120" value="${esc(e.version || "")}" placeholder="e.g. 7.4.8 · 7.4.x for a mix · 2026-11 for Microsoft · 8.0 U3m for vCenter"></label>
-    <p class="help small">Fortinet, TrueNAS and VMware advisories are checked against these: when every version you run already has the fix, the item moves to Done by itself. For Microsoft products enter the month you're patched through (e.g. 2026-11 once November's Patch Tuesday update is installed everywhere): anything Microsoft fixed in that month or earlier moves to Done. VMware vCenter: the update (8.0 U3m) or the appliance version (8.0.3.01200); ESXi: the release and build (8.0 U3k build 25595708). Other sources don't publish fixed versions, so there it's a note. Use 7.4.x when you have several patch levels on one line: Heads Up then tells you which version to check for, but won't close the item by itself.</p>
+    <p class="help small">Fortinet, TrueNAS, VMware and Node.js advisories are checked against these: when every version you run already has the fix, the item moves to Done by itself. For Microsoft products enter the month you're patched through (e.g. 2026-11 once November's Patch Tuesday update is installed everywhere): anything Microsoft fixed in that month or earlier moves to Done. VMware vCenter: the update (8.0 U3m) or the appliance version (8.0.3.01200); ESXi: the release and build (8.0 U3k build 25595708). Node.js: the exact version (24.22.2), or 24.x for a whole line. Other sources don't publish fixed versions, so there it's a note. Use 7.4.x when you have several patch levels on one line: Heads Up then tells you which version to check for, but won't close the item by itself.</p>
     <label>Note (optional)<input name="note" maxlength="200" value="${esc(e.note || "")}" placeholder="e.g. 2 firewalls at HQ, owner: network team"></label>
     <p class="err" id="inv-err"></p>
     <div class="actions"><button type="button" class="ghost" id="inv-cancel">Cancel</button><button class="primary">${isNew ? "Add" : "Save"}</button></div>
@@ -853,7 +886,7 @@ function renderInventory() {
       <button class="ghost d-close" id="d-close" title="Close (Esc)">✕</button>
       <div class="d-group">Settings</div>
       <h3>What we run</h3>
-      <p class="d-why">The products your organisation uses. Anything on the list is marked <span class="ours">WE RUN</span> and sorted first: if attackers are using it, it goes to Act now whatever its age; if it's serious (severity 7+), to Patch soon. Add the versions you run (or, for Microsoft, the month you're patched through) and Fortinet, TrueNAS, Microsoft and VMware items that are already fixed for you move to Done (marked <span class="ours">FIXED IN YOURS</span>).${invData.canEdit ? "" : " Ask an admin to change the list."}</p>
+      <p class="d-why">The products your organisation uses. Anything on the list is marked <span class="ours">WE RUN</span> and sorted first: if attackers are using it, it goes to Act now whatever its age; if it's serious (severity 7+), to Patch soon. Add the versions you run (or, for Microsoft, the month you're patched through) and Fortinet, TrueNAS, Microsoft, VMware and Node.js items that are already fixed for you move to Done (marked <span class="ours">FIXED IN YOURS</span>).${invData.canEdit ? "" : " Ask an admin to change the list."}</p>
     </div>
     <div class="d-body">
       ${invForm ? invFormBox(invForm) : ""}

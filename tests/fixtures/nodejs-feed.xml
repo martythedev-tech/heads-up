@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+    <channel>
+        <title>Node.js Blog: Vulnerability Reports</title>
+        <link>https://nodejs.org/en</link>
+        <description></description>
+        <lastBuildDate>Tue, 24 Nov 2026 20:49:05 GMT</lastBuildDate>
+        <docs>https://validator.w3.org/feed/docs/rss2.html</docs>
+        <generator>https://github.com/jpmonette/feed</generator>
+        <language>en</language>
+        <item>
+            <title><![CDATA[Wednesday, November 11, 2026 Security Releases]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/november-2026-security-releases</link>
+            <guid isPermaLink="false">/blog/vulnerability/november-2026-security-releases?1794355200000</guid>
+            <pubDate>Wed, 11 Nov 2026 00:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Wednesday, October 21, 2026 Security Releases]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/october-2026-security-releases</link>
+            <guid isPermaLink="false">/blog/vulnerability/october-2026-security-releases?1792620000000</guid>
+            <pubDate>Wed, 21 Oct 2026 22:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Wednesday, July 29, 2026 Security Releases]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/july-2026-security-releases</link>
+            <guid isPermaLink="false">/blog/vulnerability/july-2026-security-releases?1785283200000</guid>
+            <pubDate>Wed, 29 Jul 2026 00:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Thursday, June 18, 2026 Security Releases]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/june-2026-security-releases</link>
+            <guid isPermaLink="false">/blog/vulnerability/june-2026-security-releases?1781755200000</guid>
+            <pubDate>Thu, 18 Jun 2026 04:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Developing a minimally HashDoS resistant, yet quickly reversible integer hash for V8]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/march-2026-hashdos</link>
+            <guid isPermaLink="false">/blog/vulnerability/march-2026-hashdos?1774385400000</guid>
+            <pubDate>Tue, 24 Mar 2026 20:50:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Tuesday, March 24, 2026 Security Releases]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/march-2026-security-releases</link>
+            <guid isPermaLink="false">/blog/vulnerability/march-2026-security-releases?1774321200000</guid>
+            <pubDate>Tue, 24 Mar 2026 03:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[OpenSSL Security Advisory Assessment, January 2026]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/openssl-fixes-in-regular-releases-jan2026</link>
+            <guid isPermaLink="false">/blog/vulnerability/openssl-fixes-in-regular-releases-jan2026?1769619600000</guid>
+            <pubDate>Wed, 28 Jan 2026 17:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Mitigating Denial-of-Service Vulnerability from Unrecoverable Stack Space Exhaustion for React, Next.js, and APM Users]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/january-2026-dos-mitigation-async-hooks</link>
+            <guid isPermaLink="false">/blog/vulnerability/january-2026-dos-mitigation-async-hooks?1768323600000</guid>
+            <pubDate>Tue, 13 Jan 2026 17:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Tuesday, January 13, 2026 Security Releases]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/december-2025-security-releases</link>
+            <guid isPermaLink="false">/blog/vulnerability/december-2025-security-releases?1768262400000</guid>
+            <pubDate>Tue, 13 Jan 2026 00:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Tuesday, July 15, 2025 Security Releases]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/july-2025-security-releases</link>
+            <guid isPermaLink="false">/blog/vulnerability/july-2025-security-releases?1752537600000</guid>
+            <pubDate>Tue, 15 Jul 2025 00:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Wednesday, May 14, 2025 Security Releases]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/may-2025-security-releases</link>
+            <guid isPermaLink="false">/blog/vulnerability/may-2025-security-releases?1747191600000</guid>
+            <pubDate>Wed, 14 May 2025 03:00:00 GMT</pubDate>
+        </item>
+        <item>
+            <title><![CDATA[Node.js Test CI Security Incident]]></title>
+            <link>https://nodejs.org/en/blog/vulnerability/march-2025-ci-incident</link>
+            <guid isPermaLink="false">/blog/vulnerability/march-2025-ci-incident?1745425800617</guid>
+            <pubDate>Wed, 23 Apr 2025 16:30:00 GMT</pubDate>
+        </item>
+    </channel>
+</rss>

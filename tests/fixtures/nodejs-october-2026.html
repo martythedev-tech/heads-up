@@ -1,0 +1,87 @@
+<!doctype html><html><body><main><h1>Wednesday, October 21, 2026 Security Releases</h1><section><div class="mLkwoq_avatarGroup mLkwoq_medium"><span class="j-1Igq_avatar j-1Igq_medium cursor-pointer" data-state="closed"><a href="https://github.com/nodejs" target="_blank" class="j-1Igq_wrapper"><span class="j-1Igq_item j-1Igq_medium">TNJP</span></a></span></div><p>The Node.js Project</p></section><div class="pL4wLa_root pL4wLa_vulnerability"><div class="pL4wLa_container" aria-hidden="true">Wednesday, October 21, 2026 Security Releases</div></div><h2 id="security-releases-available"><a href="#security-releases-available">Security releases available</a></h2>
+<p>Updates are now available for the 26.x, 24.x, 22.x Node.js release lines for the
+following issues.</p>
+<p>This security release includes the following dependency updates to address public vulnerabilities:</p>
+<ul>
+<li>c-ares on 26.x, 24.x, 22.x</li>
+<li>ca-cert (eMudhra Intermediate CA Compromise) on 26.x, 24.x, 22.x</li>
+<li>OpenSSL on 24.x, 22.x</li>
+<li>SQLite on 22.x</li>
+<li>Undici on 26.x, 24.x, 22.x</li>
+</ul>
+<h2 id="dnsresolve-truncates-names-containing-nul-char-cve-2026-105482---high"><a href="#dnsresolve-truncates-names-containing-nul-char-cve-2026-105482---high">dns.resolve truncates names containing NUL char (CVE-2026-105482) - (high)</a></h2>
+<p>A flaw in Node.js DNS resolution allows hostnames containing a NUL byte to be silently truncated by the <code>dns.resolve*()</code> functions and <code>dns.reverse()</code>. This is an incomplete fix of CVE-2026-48930, which only covered <code>dns.lookup()</code> and the <code>net</code>/<code>tls</code> host options.</p>
+<p>Because the name is passed to c-ares as a C string, resolving <code>attacker.example\0.trusted.example</code> queries <code>attacker.example</code> and returns its records without any error. Applications that validate a hostname, for example against a domain allowlist, and then resolve it with <code>dns.resolve*()</code> can act on records for a different name than the one they validated.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>, <strong>24.x</strong>, and <strong>22.x</strong>.</p>
+<p>Thank you, to Hasan Flayyih Abdullah for reporting this vulnerability and thank you jasnell for fixing it.</p>
+<h2 id="tls-certificate-hostname-bypass-when-the-ip-is-written-fullwidth-digits-cve-2026-105483---high"><a href="#tls-certificate-hostname-bypass-when-the-ip-is-written-fullwidth-digits-cve-2026-105483---high">TLS certificate hostname bypass when the IP is written fullwidth digits (CVE-2026-105483) - (high)</a></h2>
+<p>A flaw in Node.js TLS hostname verification allows a certificate without a matching IP address SAN to authenticate a connection to an IPv4 address when the host is written with non-ASCII characters, such as fullwidth digits (<code>１２７.0.0.1</code>).</p>
+<p><code>tls.checkServerIdentity()</code> did not recognize such hosts as IP addresses, even though they normalize and resolve to a regular IPv4 address, and matched them against the certificate DNS names and Common Name instead. A certificate containing <code>DNS:127.0.0.1</code> or <code>DNS:*.0.0.1</code> could therefore be accepted for an IP endpoint it was not issued for. This is a regression introduced after the fix for CVE-2026-48618.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong> and <strong>24.x</strong>.</p>
+<p>Thank you, to Hasan Flayyih Abdullah for reporting this vulnerability and thank you jasnell for fixing it.</p>
+<h2 id="tls-certificate-hostname-bypass-when-the-host-loosely-resolves-to-an-ip-address-cve-2026-106069---high"><a href="#tls-certificate-hostname-bypass-when-the-host-loosely-resolves-to-an-ip-address-cve-2026-106069---high">TLS certificate hostname bypass when the host loosely resolves to an IP address (CVE-2026-106069) - (high)</a></h2>
+<p>A flaw in Node.js TLS hostname verification can cause a server certificate to be validated against a different IP address than the one the client connected to, when the host is a non-canonical IPv4 literal with a leading zero, such as <code>0127.0.0.1</code>.</p>
+<p><code>tls.checkServerIdentity()</code> normalizes the host following the WHATWG URL rules, which read a leading-zero octet as octal (<code>0127.0.0.1</code> becomes <code>87.0.0.1</code>), while the connection is made through the operating system resolver, which on some platforms such as macOS reads it as decimal (<code>127.0.0.1</code>). A server at the connected address can then be authenticated with a certificate issued for another IP address.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>, <strong>24.x</strong>, and <strong>22.x</strong>.</p>
+<p>Thank you, to anagnorisis2peripeteia for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h2 id="nodejs-brotli-decoder-out-of-bounds-write-permits-remote-code-execution-cve-2026-111497---high"><a href="#nodejs-brotli-decoder-out-of-bounds-write-permits-remote-code-execution-cve-2026-111497---high">Node.js Brotli decoder out-of-bounds write permits remote code execution (CVE-2026-111497) - (high)</a></h2>
+<p>A flaw in the Brotli decoder bundled with Node.js allows malformed compressed input to write past the end of an internal decoder buffer.</p>
+<p>An invalid block switch was reported as a temporary need for more input instead of a permanent format error, so the streaming decoder kept appending input bytes to an eight-byte internal buffer. An attacker who can supply Brotli data that an application decompresses with <code>node:zlib</code> can corrupt process memory, which can lead to a crash, disclosure of process memory, or remote code execution.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>, <strong>24.x</strong>, and <strong>22.x</strong>.</p>
+<p>Thank you, to OpenAI Codex Security - Khai Tran and Sylvie Mayer for reporting this vulnerability and thank you mcollina and aduh95 for fixing it.</p>
+<h2 id="keep-alive-socket-process-a-response-that-was-written-before-the-request-was-sent-cve-2026-105481---medium"><a href="#keep-alive-socket-process-a-response-that-was-written-before-the-request-was-sent-cve-2026-105481---medium">Keep-alive socket process a response that was written before the request was sent (CVE-2026-105481) - (medium)</a></h2>
+<p>A flaw in Node.js HTTP Agent connection reuse can cause a client to accept as valid a response that was sent before the client has sent the request. This is an incomplete fix of CVE-2026-48931.</p>
+<p>The guard that destroys idle keep-alive sockets when unexpected data arrives only runs when the event loop polls for I/O. If an unsolicited response has already reached the socket but has not been read yet when the socket is handed to a new request, for example because the event loop was busy with synchronous work, the guard is removed without seeing it and the data is parsed as the response to the new request.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>, <strong>24.x</strong>, and <strong>22.x</strong>.</p>
+<p>Thank you, to Hasan Flayyih Abdullah for reporting this vulnerability and thank you jasnell for fixing it.</p>
+<h2 id="improper-certificate-validation-for-non-canonical-ipv4-hostnames-allows-dns-sans-to-authenticate-ip-endpoints-cve-2026-106072---medium"><a href="#improper-certificate-validation-for-non-canonical-ipv4-hostnames-allows-dns-sans-to-authenticate-ip-endpoints-cve-2026-106072---medium">Improper certificate validation for non-canonical IPv4 hostnames allows DNS SANs to authenticate IP endpoints (CVE-2026-106072) - (medium)</a></h2>
+<p>A flaw in Node.js TLS hostname verification allows a certificate with only a DNS SAN to authenticate an IP endpoint when the client connects using a non-canonical IPv4 spelling, such as <code>0177.0.0.1</code>, <code>0x7f.0.0.1</code>, <code>2130706433</code> or <code>127.1</code>.</p>
+<p><code>tls.checkServerIdentity()</code> did not classify these hosts as IP addresses, but normalized them to their canonical form and matched the result against the certificate DNS names. A certificate containing <code>DNS:127.0.0.1</code> and no <code>IP Address:127.0.0.1</code> SAN was therefore accepted, while the same certificate is correctly rejected for <code>127.0.0.1</code>. Exploitation requires a certificate with a numeric DNS SAN issued by a CA trusted by the client, and a platform resolver that accepts these spellings, such as glibc.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>, <strong>24.x</strong>, and <strong>22.x</strong>.</p>
+<p>Thank you, to br41ny for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h2 id="cryptorandomuuid-and-randomint-entropy-caches-are-saved-into-user-land-startup-snapshots-and-seas-so-every-process-repeats-the-same-values-cve-2026-106074---medium"><a href="#cryptorandomuuid-and-randomint-entropy-caches-are-saved-into-user-land-startup-snapshots-and-seas-so-every-process-repeats-the-same-values-cve-2026-106074---medium">crypto.randomUUID() and randomInt() entropy caches are saved into user-land startup snapshots and SEAs, so every process repeats the same values (CVE-2026-106074) - (medium)</a></h2>
+<p>A flaw in Node.js <code>crypto</code> causes the internal entropy caches used by <code>crypto.randomUUID()</code>, <code>crypto.randomUUIDv7()</code>, and <code>crypto.randomInt()</code> to be saved into user-land startup snapshots (<code>--build-snapshot</code>) and single executable applications built with <code>useSnapshot</code>.</p>
+<p>If any of these functions, or an API that relies on them such as <code>URL.createObjectURL()</code>, is called while the snapshot is built, every process started from that snapshot returns the same values until the cache is refilled: up to 127 UUIDs and about 1,000 <code>randomInt()</code> values. Identifiers expected to be unique can collide across processes, and values issued by one process can be predicted by observing another.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>, <strong>24.x</strong>, and <strong>22.x</strong>.</p>
+<p>Thank you, to gesposito for reporting this vulnerability and thank you panva for fixing it.</p>
+<h2 id="nodejs-zipfile-returns-attacker-controlled-prefix-bytes-after-failed-zip-header-validation-cve-2026-106070---low"><a href="#nodejs-zipfile-returns-attacker-controlled-prefix-bytes-after-failed-zip-header-validation-cve-2026-106070---low">Node.js ZipFile returns attacker-controlled prefix bytes after failed ZIP header validation (CVE-2026-106070) - (low)</a></h2>
+<p>A flaw in the Node.js <code>zlib.ZipFile</code> API can cause it to return bytes that do not belong to the requested entry after the local and central header validation fails.</p>
+<p>When <code>zipEntry.modified</code> is read on an archive whose local header does not match its central directory, either directly or while compacting the archive, the validation error is caught but the parsed local header is left cached without a content offset. A later content read then returns attacker-controlled bytes from the start of the file instead of rejecting the archive, and CRC-32 verification still passes because the attacker controls the central directory CRC. A Node.js-based scanner can therefore approve different content from what another ZIP implementation extracts from the same archive.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>.</p>
+<p>Thank you, to startimeash for reporting this vulnerability and thank you mcollina for fixing it.</p>
+<h2 id="permission-model-filesystem-over-grant-via-wildcard-radix-lookup-cve-2026-106071---low"><a href="#permission-model-filesystem-over-grant-via-wildcard-radix-lookup-cve-2026-106071---low">Permission Model filesystem over-grant via wildcard radix lookup (CVE-2026-106071) - (low)</a></h2>
+<p>A flaw in Node.js Permission Model filesystem enforcement can grant access to paths that do not match a wildcard <code>--allow-fs-read</code> or <code>--allow-fs-write</code> rule.</p>
+<p>When the requested path is shorter than the prefix of a wildcard grant, the radix tree lookup stops comparing early and treats the path as a match. For example, <code>--allow-fs-read=/etc/passwd.*</code> also allows reading <code>/etc/passwd</code>. This requires the wildcard grant to sit directly under the root of the permission tree, for example when it is the only grant for that scope. This is a different root cause from CVE-2026-58043.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>.</p>
+<p>Thank you, to malikhamzaiqbal for reporting this vulnerability and thank you jasnell for fixing it.</p>
+<h2 id="permission-model-bypass-with-fsrealpathsync-cve-2026-106073---low"><a href="#permission-model-bypass-with-fsrealpathsync-cve-2026-106073---low">Permission Model bypass with fs.realpathSync (CVE-2026-106073) - (low)</a></h2>
+<p>A flaw in Node.js Permission Model filesystem enforcement leaves <code>fs.realpathSync()</code> without the required read permission checks. This is an incomplete fix of CVE-2026-21715, which only covered <code>fs.realpathSync.native()</code>.</p>
+<p>As a result, code running under <code>--permission</code> with restricted <code>--allow-fs-read</code> can still use <code>fs.realpathSync()</code> to check file existence, resolve symlink targets, and enumerate filesystem paths outside of permitted directories.</p>
+<p>This vulnerability affects Node.js <strong>26.x</strong>, <strong>24.x</strong>, and <strong>22.x</strong>.</p>
+<p>Thank you, to 0xoroot for reporting this vulnerability and thank you RafaelGSS for fixing it.</p>
+<h2 id="downloads-and-release-details"><a href="#downloads-and-release-details">Downloads and release details</a></h2>
+<ul>
+<li><a href="/en/blog/release/v22.23.4/">Node.js v22.23.4</a></li>
+<li><a href="/en/blog/release/v24.22.1/">Node.js v24.22.1</a></li>
+<li><a href="/en/blog/release/v26.12.1/">Node.js v26.12.1</a></li>
+</ul>
+<h1 id="summary"><a href="#summary">Summary</a></h1>
+<p>The Node.js project will release new versions of the 26.x, 24.x, 22.x
+releases lines on or shortly after, Wednesday, October 21, 2026 in order to address
+security vulnerabilities.</p>
+<p>The highest severity issue fixed in this release is HIGH.</p>
+<h2 id="impact"><a href="#impact">Impact</a></h2>
+<ul>
+<li>The highest severity issue fixed in the 26.x release line is HIGH.</li>
+<li>The highest severity issue fixed in the 24.x release line is HIGH.</li>
+<li>The highest severity issue fixed in the 22.x release line is HIGH.</li>
+</ul>
+<p>It&#x27;s important to note that End-of-Life versions are always affected when a security release occurs.
+To ensure your system&#x27;s security, please use an up-to-date version as outlined in our
+<a href="https://github.com/nodejs/release#release-schedule">Release Schedule</a>.</p>
+<h2 id="release-timing"><a href="#release-timing">Release timing</a></h2>
+<p>Releases will be available on, or shortly after, Wednesday, October 21, 2026.</p>
+<h2 id="contact-and-future-updates"><a href="#contact-and-future-updates">Contact and future updates</a></h2>
+<p>The current Node.js security policy can be found at <a href="https://nodejs.org/en/security/">https://nodejs.org/en/security/</a>.
+Please follow the process outlined in <a href="https://github.com/nodejs/node/blob/master/SECURITY.md">https://github.com/nodejs/node/blob/master/SECURITY.md</a> if you wish to report a vulnerability in Node.js.</p>
+<p>Subscribe to the low-volume announcement-only nodejs-sec mailing list at <a href="https://groups.google.com/forum/#!forum/nodejs-sec">https://groups.google.com/forum/#!forum/nodejs-sec</a> to stay up to date on security vulnerabilities and security-related releases of Node.js and the projects maintained in the nodejs GitHub organization.</p><div class="max-ml:grid-cols-1 mt-4 grid w-full grid-cols-2 gap-4"><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/november-2026-security-releases"><span class="A9kfJq_header">Previous</span><span class="A9kfJq_content">Wednesday, November 11, 2026 Security Releases</span></a><a class="A9kfJq_crossLink" href="/en/blog/vulnerability/july-2026-security-releases"><span class="A9kfJq_header A9kfJq_reverse">Next</span><span class="A9kfJq_content A9kfJq_reverse">Wednesday, July 29, 2026 Security Releases</span></a></div></main></div><aside class="_0yZVBa_wrapper" aria-label="Article metadata"><dl><dt>Last Updated</dt><dd>Oct 21, </main></body></html>

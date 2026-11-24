@@ -13,6 +13,10 @@ affected.
 VMware: vCenter and ESXi, from the affected ranges in the CVE records (vmware.py),
 e.g. "8.0 up to 8.0 U3m" or "8.0 up to ESXi80U3k-25595708".
 
+Node.js: the fixed version per major line from the security release (nodejs.py):
+"24.22.2" against 24.22.3; a line the release leaves out is end-of-life (affected)
+or not affected, by the release schedule; "24" or "24.x" means the whole line.
+
 Microsoft: Windows and most Microsoft products patch by monthly cumulative
 updates, so the "version" is the month you're patched through ("2026-11" or
 "November 2026"). An item Microsoft fixed in that month or earlier is fixed.
@@ -25,6 +29,7 @@ fix listed, wording that doesn't parse, or a product with no version entered.
 """
 import re
 
+import nodejs as NJ
 import vmware as VM
 
 VER = re.compile(r"(?<![\d.])\d+(?:\.\d+)+(?:\.[xX*])?")
@@ -133,7 +138,7 @@ def from_ranges(product, ver, ranges):
     return "notaffected", None, None
 
 
-def check(entries, fixes, ranges=(), ms=(), vmw=()):
+def check(entries, fixes, ranges=(), ms=(), vmw=(), node=None):
     """entries: the What we run entries this item matched, each {name, terms, version}.
     fixes: everything fortinet_fixes / truenas_fixes found for this item, all vendors together.
     ranges: Fortinet's affected version ranges (fortinet_ranges), used for a product
@@ -141,13 +146,15 @@ def check(entries, fixes, ranges=(), ms=(), vmw=()):
     ms: the Microsoft releases that fixed the item's CVEs (ms_fixes), compared with a
     month in the entry's version box.
     vmw: VMware's vCenter/ESXi affected ranges for the item's CVEs (vmware.parse_ranges).
+    node: the Node.js security release behind the item (nodejs.info), for Node.js entries.
 
     Returns None when no entry with versions has data here, else
     {"fixed": bool (every matched entry is on a fixed or unaffected version), "notes": [...]},
     where each note is {product, version, state, fix, upto}; state is
       fixed / notaffected                     counts as done
       upgrade / upcoming / migrate / line     from a fix line (line = a whole line like 7.4.x)
-      affected / affectedline / rangeline     from the ranges (no fix version known)
+      affected / affectedline / rangeline     from the ranges (no fix version known; Node.js: eol=True)
+      due                                     Node.js: the release is announced, not out yet
       msfixed / msupdate                      Microsoft: patched through a month at or after the fix, or not
       unlisted                                a fix line exists for another line only
       nodata / noversion                      nothing to compare, or no version entered
@@ -165,6 +172,11 @@ def check(entries, fixes, ranges=(), ms=(), vmw=()):
             notes.append({"product": e["name"], "version": f"patched through {month_label(month)}",
                           "state": "msfixed" if month >= need["month"] else "msupdate", "fix": need["label"],
                           "upto": None, "vendor": "Microsoft"})
+            continue
+        if node and NJ.is_node(e):
+            nj = NJ.check(e, node)
+            notes += nj
+            checked = checked or any(n["state"] != "noversion" for n in nj)
             continue
         vm_note = VM.check(e, vmw) if vmw else None
         if vm_note:
@@ -230,7 +242,8 @@ def why(result):
             basis = f"fix {n['fix']}" if n.get("fix") else f"affected up to {n['upto']}"
             out += [[run + ": ", False], ["already fixed", True], [f" ({basis}).", False]]
         elif st == "notaffected":
-            out += [[run + ": ", False], ["not affected", True], [f" (Fortinet doesn't list it as affected).", False]]
+            who = n.get("vendor") or "Fortinet"
+            out += [[run + ": ", False], ["not affected", True], [f" ({who} doesn't list it as affected).", False]]
         elif st == "upgrade":
             out += [[run + ": ", False], [f"upgrade to {n['fix']}", True], [".", False]]
         elif st == "line" and n.get("vendor") == "VMware":
@@ -243,6 +256,12 @@ def why(result):
             out += [[run + ": ", False], [f"upgrade to {n['fix']}", True], [" when it's released.", False]]
         elif st == "migrate":
             out += [[run + ": ", False], [f"no fix on the {_line(n)} line", True], [", move to a fixed release.", False]]
+        elif st == "due":
+            out += [[run + ": ", False], [f"upgrade when the {_line(n)}.x fix comes out", True],
+                    [f" (due {n['fix']})." if n.get("fix") else ".", False]]
+        elif st == "affectedline" and n.get("eol"):
+            out += [[run + ": ", False], [f"Node.js {_line(n)} is past end-of-life", True],
+                    [" and gets no fixes; move to a supported line.", False]]
         elif st == "affectedline":
             out += [[run + ": ", False], [f"the whole {_line(n)} line is affected", True],
                     [", move to a fixed release.", False]]
