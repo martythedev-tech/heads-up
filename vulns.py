@@ -10,8 +10,10 @@ Groups:
          Ubuntu rates it critical, EPSS >= 0.5, or TrueNAS rated its impact
          High/Critical in the last 45 days, or Fortinet rated an advisory for
          your Fortinet products 9+ in the last 45 days
-         (Fortinet saying "exploited in the wild" counts as exploited; for a
-         product you don't run it stays in For awareness)
+         (Fortinet or Broadcom saying "exploited in the wild" counts as
+         exploited; for a product you don't run it stays in For awareness)
+         A VMware advisory (VMSA) for VMware products not on What we run stays
+         in For awareness when the list has entries.
   aware  everything else (incl. exploited more than 14 days ago)
   done   marked Patched or Not affected
 
@@ -19,7 +21,7 @@ Groups:
   act    exploited, whatever its age or source (no "check whether you run it")
   soon   not exploited but serious: CVSS >= 7, Ubuntu high/critical, TrueNAS
          High/Critical, or any Cloudflare briefing
-  done   every version you run already has Fortinet's / TrueNAS's fix, or the
+  done   every version you run already has Fortinet's / TrueNAS's / VMware's fix, or the
          month you're patched through is at or after Microsoft's fix
          (versions.py), unless someone set a status by hand
 """
@@ -95,7 +97,7 @@ def build(items, releases, inventory=None):
     out, by_cve = [], {}
 
     def base(p):
-        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "tns": [], "fns": [], "usnPrimary": False}
+        return {"id": p["id"], "primary": p, "zw": None, "kevs": [], "usns": [], "ms": [], "vcs": [], "tns": [], "fns": [], "vms": [], "usnPrimary": False}
 
     def add(v):
         out.append(v)
@@ -144,6 +146,16 @@ def build(items, releases, inventory=None):
                 v["fns"] = [it]
                 add(v)
     for it in items:
+        if it["source"] == "vmsa":
+            # one VMSA covers many CVEs; join the first one already listed
+            v = next((by_cve[c["id"]] for c in it["cves"] if c["id"] in by_cve), None)
+            if v:
+                v["vms"].append(it)
+            else:
+                v = base(it)
+                v["vms"] = [it]
+                add(v)
+    for it in items:
         if it["source"] == "truenas":
             # one page can cover several CVEs (Samba, Lodash); join the first one already listed
             v = next((by_cve[c["id"]] for c in it["cves"] if c["id"] in by_cve), None)
@@ -171,7 +183,7 @@ def build(items, releases, inventory=None):
     today = datetime.now(timezone.utc).date()
     entries = {e["name"]: e for e in inventory or []}
     for v in out:
-        parts = [v["primary"], v["zw"], *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"]]
+        parts = [v["primary"], v["zw"], *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"], *v["vms"]]
         via = {}   # product name -> the sources it matched through
         if matcher:
             for i in {id(i): i for i in parts if i}.values():
@@ -210,14 +222,27 @@ def describe(v, releases, today, entries=None):
     fn_mine = bool(fn) and bool(fn.get("yours"))
     fn_dates = sorted(f["published"] for f in fn_pages.values() if f.get("exploited") and f.get("published"))
     fn_urgent = fn_mine and (fn.get("cvss") or 0) >= 9 and TN.is_recent(fn.get("published"), days=FN.SOON_DAYS, today=today)
-    exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates) or bool(fn_dates)
+    # what Broadcom said: VMSAs attached here, plus any VMSA naming one of its CVEs
+    vm_pages = {i["extra"]["id"]: i["extra"] for i in v["vms"]}
+    vm_cve = {}
+    for c in cves:
+        if c.get("vmsa"):
+            vm_cve.setdefault(c["vmsa"]["id"], c["vmsa"])
+            if c["vmsa"]["exploited"]:
+                vm_cve[c["vmsa"]["id"]] = c["vmsa"]
+    vm = max([*vm_pages.values(), *[x for k, x in vm_cve.items() if k not in vm_pages]],
+             key=lambda x: (bool(x.get("exploited")), x.get("cvss") or 0), default=None)
+    vm_dates = sorted({x["published"] for x in [*vm_pages.values(), *vm_cve.values()]
+                       if x.get("exploited") and x.get("published")})
+    exploited = bool(kev_dates) or bool(ms_exploited) or bool(vc_dates) or bool(fn_dates) or bool(vm_dates)
     # CISA's KEV (or VulnCheck's copy of it) says ransomware gangs are known to use one of its CVEs
     ransomware = any((c.get(src) or {}).get("ransomware") == "Known" for c in cves for src in ("kev", "vulncheck"))
     ssvc = worst_ssvc([c["ssvc"] for c in cves if c.get("ssvc")])
     kev_last = kev_dates[-1] if kev_dates else (vc_dates[-1] if vc_dates else (ms_dates[-1] if ms_dates else
-                                                                              (fn_dates[-1] if fn_dates else None)))
+                                                                              (fn_dates[-1] if fn_dates else
+                                                                               (vm_dates[-1] if vm_dates else None))))
     exploited_by = ("CISA" if kev_dates else "VulnCheck" if vc_dates else "Microsoft" if ms_exploited
-                    else "Fortinet" if fn_dates else None)
+                    else "Fortinet" if fn_dates else "Broadcom" if vm_dates else None)
     # exploited only according to Fortinet, in a Fortinet product you don't run
     fn_not_mine = exploited_by == "Fortinet" and not fn_mine
     # how many days VulnCheck listed it before CISA did
@@ -266,6 +291,9 @@ def describe(v, releases, today, entries=None):
         product = ((p.get("extra") or {}).get("yours") or p.get("tags") or ["Fortinet"])[0]
         title = p["title"] if product.lower() in p["title"].lower() else f"{product}: {p['title']}"
         desc = p["summary"]
+    elif p["source"] == "vmsa":
+        title = p["title"] if "vmware" in p["title"].lower() else f"VMware: {p['title']}"
+        desc = p["summary"]
     else:
         title = f"{p['title']}: {kev_short(p)}"
         desc = str(p.get("summary") or "")
@@ -298,6 +326,8 @@ def describe(v, releases, today, entries=None):
     old_cve = bool(years) and max(years) < today.year - 1
     vc_strong = (any((c.get("vulncheck") or {}).get("canary") for c in cves)
                  or exploit in ("metasploit", "exploitdb") or (cvss or 0) >= 9 or bool(zw) or bool(ms_info))
+    # A VMware advisory for VMware products you don't list (when you list anything)
+    vm_not_mine = p["source"] == "vmsa" and not ours and bool(entries) and not v["kevs"] and not v["vcs"]
     # Known only through a TrueNAS impact statement that rates it Low/Medium on
     # TrueNAS: the vendor's rating wins, so at most Patch soon.
     tn_softened = bool(ours) and v.get("oursTrueNASOnly") and bool(tn) and tn.get("level") in ("low", "medium")
@@ -312,6 +342,8 @@ def describe(v, releases, today, entries=None):
     elif vc_only and not (vc_strong and recent_kev and not old_cve):
         group = "aware"
     elif fn_not_mine and not ours:
+        group = "aware"
+    elif vm_not_mine:
         group = "aware"
     elif exploited and (cf_urgent or recent_kev):
         group = "act"
@@ -356,6 +388,12 @@ def describe(v, releases, today, entries=None):
     elif p["source"] == "fortinet" and fn:
         why += [["Fortinet advisory for your ", False], [", ".join(fn["yours"] or fn["products"]), True],
                 [f" (CVSS {fn['cvss']:.1f})." if fn.get("cvss") is not None else ".", False]]
+    elif p["source"] == "vmsa" and vm:
+        why += [["VMware advisory ", False], [vm.get("rev") or vm["id"], True],
+                [f" ({vm['severity'] or 'unrated'}" + (f", up to CVSS {vm['cvss']:.1f}" if vm.get("cvss") is not None else "")
+                 + ").", False]]
+        if vm_not_mine:
+            why += [[f" Not one of your VMware products ({', '.join(vm.get('products') or [])}).", False]]
     elif p["source"] == "truenas" and tn:
         if tn.get("level") == "none":
             why += [["TrueNAS itself is not affected", True],
@@ -400,6 +438,8 @@ def describe(v, releases, today, entries=None):
             why += [[" An IPS virtual patch is available.", False]]
     elif not done and fn and fn.get("kind") == "statement" and p["source"] != "fortinet":
         why += [[" Fortinet published a statement on this.", False]]
+    if not done and vm and p["source"] != "vmsa":
+        why += [[" Broadcom: ", False], [vm.get("rev") or vm["id"], True], [".", False]]
     if not done and tn and p["source"] != "truenas" and not tn_softened:
         why += [[" TrueNAS itself is not affected." if tn.get("level") == "none"
                  else f" TrueNAS rates the impact {tn.get('rating') or 'unrated'}.", False]]
@@ -418,7 +458,7 @@ def describe(v, releases, today, entries=None):
             why += [[" Ubuntu fix still pending.", False]]
 
     reported = [s for s, on in (("Cloudflare", bool(zw)), ("CISA", bool(kev_dates)), ("VulnCheck", bool(vc_dates)),
-                                ("Microsoft", bool(ms_info)), ("TrueNAS", bool(tn)), ("Fortinet", bool(fn)),
+                                ("Microsoft", bool(ms_info)), ("TrueNAS", bool(tn)), ("Fortinet", bool(fn)), ("Broadcom", bool(vm)),
                                 ("Ubuntu", bool(ubuntu["fixed"] or ubuntu["pending"]))) if on]
     return {
         "id": v["id"], "group": group, "title": title, "desc": desc, "why": why,
@@ -435,9 +475,10 @@ def describe(v, releases, today, entries=None):
         "vcIds": [x["id"] for x in v["vcs"]], "vcLeadDays": vc_lead,
         "tnIds": [x["id"] for x in v["tns"]], "truenas": tn,
         "fnIds": [x["id"] for x in v["fns"]], "fortinet": fn, "ours": ours,
+        "vmIds": [x["id"] for x in v["vms"]], "vmsa": vm,
         "microsoft": ms_info[0] if ms_info else None,
         "latest": _max([i.get("updated") or i.get("published") for i in
-                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"]] if i]) or "",
+                        [zw, *v["kevs"], *v["usns"], *v["ms"], *v["vcs"], *v["tns"], *v["fns"], *v["vms"]] if i]) or "",
         "triage": triage, "versionCheck": vcheck, "autoDone": auto_fixed,
     }
 

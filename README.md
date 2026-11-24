@@ -18,7 +18,7 @@ Every vulnerability appears once, in one of four groups:
 
 | Group | Meaning |
 | --- | --- |
-| **Act now** | Attackers are using it (CISA, VulnCheck, Microsoft or Fortinet), and Cloudflare flagged it, it was reported in the last 14 days, or you run it |
+| **Act now** | Attackers are using it (CISA, VulnCheck, Microsoft, Fortinet or Broadcom), and Cloudflare flagged it, it was reported in the last 14 days, or you run it |
 | **Patch soon** | Critical, but not confirmed as exploited yet |
 | **For awareness** | Exploited more than 2 weeks ago, Cloudflare reference briefings, high-priority Ubuntu updates |
 | **Done** | Marked Patched or Not affected |
@@ -32,6 +32,7 @@ Sources, each with its own colour on the page:
 - **Microsoft**: Patch Tuesday from the [Security Update Guide](https://msrc.microsoft.com/update-guide) (every 6 h): zero-days (exploited or publicly disclosed) and Critical or Important CVEs with proof-of-concept code on GitHub join the list; every CVE Microsoft fixed is marked
 - **TrueNAS**: [security advisories and impact statements](https://security.truenas.com/) from iXsystems (RSS, every 6 h). Pages from the last year join the list with TrueNAS's own impact rating, fix version and what to do; pages about wider CVEs (kernel, Samba, PHP, ...) are merged into the matching entry, so a CVSS 9.8 bug that TrueNAS rates Medium says so. A new "New TrueNAS security advisory" webhook event announces each new page once
 - **Fortinet**: [PSIRT advisories](https://www.fortiguard.com/psirt) (RSS + each advisory's CSAF file, every 6 h), filtered to the products in `HU_FORTINET_PRODUCTS` (default `FortiOS,FortiAnalyzer,FortiClient`; a name covers its variants such as FortiClientWindows and FortiClientEMS, not the Cloud/PaaS services). Entries show Fortinet's CVSS, fixed versions per release line, and workarounds or IPS virtual patches. An advisory Fortinet marks "exploited in the wild" counts as exploited (For awareness if it's for a product you don't run). Fortinet's statements on other software (e.g. Linux kernel) are attached to existing entries. A "New Fortinet advisories for your products" webhook event sends one message per batch
+- **VMware (Broadcom)**: [VMware security advisories](https://support.broadcom.com/web/ecx/security-advisory?segment=VC) (VMSAs, every 3 h). Broadcom posts a VMSA before the CVE records behind it go live, so this is often the first word of a VMware bug. The portal has no feed; each advisory is a plain page under a running notification number shared by all Broadcom divisions, so Heads Up reads the numbers after the newest one it knows (stopping after 40 unused ones, at most 150 pages a run, 1 s apart) and re-reads advisories from the last 60 days once a day for revisions. Pages that answer with Cloudflare's browser check are other divisions' advisories and are skipped, never pushed through; if every page asks for it, the source reports an error. Each VMSA becomes one entry (last 365 days) with Broadcom's per-CVE scores, its sections, and an "exploited in the wild" note counted as exploited. Its response matrix gives the vCenter/ESXi fixed versions for What we run (it wins over the CVE records). A VMSA for VMware products not on What we run stays in For awareness. A "New VMware security advisory" webhook event sends one message per advisory
 - **Exploit code**: [Metasploit](https://github.com/rapid7/metasploit-framework) exploit modules and [Exploit-DB](https://www.exploit-db.com) entries (daily), and proof-of-concept repositories on GitHub via [PoC-in-GitHub](https://github.com/nomi-sec/PoC-in-GitHub)
 - Scores per CVE: severity from [NVD](https://nvd.nist.gov) (CVSS; looked up 40 per hour, so a long list takes a while to fill in, and not for CVEs known only from Ubuntu notices, which have Ubuntu's priority instead), using Microsoft's or Fortinet's own score until NVD has one; and exploit chance from [FIRST EPSS](https://www.first.org/epss/) with its trend over the last month
 
@@ -59,7 +60,7 @@ differ ("7.4.8, 7.6.3"), or a whole release line ("7.4.x") when several patch
 levels are in use; a whole line is never counted as fixed, it says which
 version to check for. Fortinet's fixed versions per release line and
 TrueNAS's "Fixed in" (or, on impact statements without that field, a
-release the text says has the fix, such as "fixed in 25.10.4") and VMware's vCenter/ESXi fixed versions (from the CVE records:
+release the text says has the fix, such as "fixed in 25.10.4") and VMware's vCenter/ESXi fixed versions (from Broadcom's advisories, else the CVE records:
 "8.0 U3m", "ESXi80U3k-25595708"; type "8.0 U3m" or "8.0.3.01200" for vCenter, "8.0 U3k
 build 25595708" for ESXi) are compared with them (when Fortinet's fix lines leave
 a product out, which its files sometimes do, the affected version ranges in
@@ -116,7 +117,7 @@ logged under their name.
   Tested on Ubuntu 26.04; Ubuntu 24.04 and Debian 12 or newer work the same way.
 - Outbound HTTPS from the server to radar.cloudflare.com, api.cloudflare.com,
   cisa.gov, ubuntu.com, api.osv.dev, api.first.org, services.nvd.nist.gov,
-  api.msrc.microsoft.com, cveawg.mitre.org, security.truenas.com, filestore.fortinet.com, gitlab.com (Exploit-DB), raw.githubusercontent.com, api.github.com
+  api.msrc.microsoft.com, cveawg.mitre.org, security.truenas.com, filestore.fortinet.com, support.broadcom.com, gitlab.com (Exploit-DB), raw.githubusercontent.com, api.github.com
   and (with a token) api.vulncheck.com / serve.vulncheck.com.
 - Two free ports: **9443** (the dashboard, HTTPS) and **9080** (redirects to
   HTTPS and serves the certificate to trust). Both can be changed.
@@ -242,6 +243,7 @@ choice of what to be told about:
 - **Routing incident on a watched network**: a route hijack or leak involves a network you watch
 - **New TrueNAS security advisory**: iXsystems published an advisory or impact statement
 - **New Fortinet advisories for your products**: one message per batch
+- **New VMware security advisory**: Broadcom published a VMSA: its worst issues and scores, and which of your products it names
 - **Heads Up or a source stops working**: a source keeps failing past its next
   retry or goes quiet, or Heads Up itself is down or hung (checked every 5
   minutes by a separate watchdog). One message when it breaks, one when it
@@ -372,7 +374,7 @@ one (the keyring entry is `service heads-up purpose admin`).
 A small aiohttp app (`app.py`; grouping in `vulns.py`, alerts in
 `webhooks.py`, accounts in `users.py`, search in `search.py`, source health in
 `health.py`, backups in `backups.py`, the down alert in `watchdog.py`, charts and Radar in `charts.py`,
-exploit code in `exploits.py`, Microsoft in `msrc.py`, TrueNAS in `truenas.py`, Fortinet in `fortinet.py`, what we run in `inventory.py`, VulnCheck in
+exploit code in `exploits.py`, Microsoft in `msrc.py`, TrueNAS in `truenas.py`, Fortinet in `fortinet.py`, VMware advisories in `vmsa.py` (fixed-version checks in `vmware.py`), what we run in `inventory.py`, VulnCheck in
 `vulncheck.py`, transaction helper in `dbutil.py`) with a static front end and SQLite
 state, run by a hardened systemd unit (`DynamicUser`, read-only system,
 secrets via `systemd-creds`). Run it locally without TLS:

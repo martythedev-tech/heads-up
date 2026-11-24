@@ -3,7 +3,7 @@
 Each entry has a display name and the words that identify it in the feeds
 ("FortiGate" -> FortiGate, FortiOS). A word matches whole words only, case
 insensitive, against the product fields of each source (CISA/VulnCheck
-vendor and product, Microsoft product, Fortinet products, TrueNAS, Ubuntu
+vendor and product, Microsoft product, Fortinet products, VMware products, TrueNAS, Ubuntu
 packages, Cloudflare's title and topics), never against free text, so
 "Exchange" doesn't match a description that mentions "key exchange".
 The version box takes the versions you run, comma-separated ("7.4.8, 7.6.3"
@@ -94,6 +94,8 @@ def product_text(it):
         parts = ["Microsoft", *tags]
     elif src == "fortinet":
         parts = ["Fortinet", *(extra.get("products") or tags)]
+    elif src == "vmsa":
+        parts = ["VMware", *(extra.get("products") or tags)]
     elif src == "truenas":
         parts = [] if extra.get("level") == "none" else ["TrueNAS"]   # TrueNAS says it's not affected
     elif src == "ubuntu":
@@ -117,6 +119,8 @@ def suggestions(items, limit=400):
         elif src == "msrc":
             c.update(t for t in tags)
         elif src == "fortinet":
+            c.update(extra.get("products") or [])
+        elif src == "vmsa":
             c.update(extra.get("products") or [])
         elif src == "truenas":
             c["TrueNAS"] += 1

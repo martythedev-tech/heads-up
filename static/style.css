@@ -39,6 +39,8 @@
   --src-tn-bg: #e8edf4;
   --src-fn: #9a3412;
   --src-fn-bg: #f8ebe4;
+  --src-vm: #4b5a66;
+  --src-vm-bg: #e9eef1;
   --shadow: 0 1px 2px rgb(16 24 40 / 5%);
   --radius: 8px;
   --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
@@ -78,6 +80,8 @@
     --src-tn-bg: #1a2433;
     --src-fn: #f2a07b;
     --src-fn-bg: #33190f;
+    --src-vm: #a9bccb;
+    --src-vm-bg: #1c252c;
     --shadow: none;
     --series-1: #3987e5;
     --series-2: #d95926;
@@ -496,6 +500,10 @@ table.data tr.click:hover td { background: var(--panel-2); }
 /* fortinet */
 .badge.fn { background: var(--src-fn-bg); color: var(--src-fn); }
 .box.src-fn { border-top: 3px solid var(--src-fn); }
+.badge.vm { background: var(--src-vm-bg); color: var(--src-vm); }
+.box.src-vm { border-top: 3px solid var(--src-vm); }
+.box .vm-sections { margin: 8px 0 0; }
+.box .vm-sections li { margin: 2px 0; }
 .box .fn-fixes { margin: 0; padding-left: 16px; }
 .sources-strip { grid-template-columns: repeat(3, 1fr); }
 ul.plain { list-style: none; padding: 0; margin: 0; }

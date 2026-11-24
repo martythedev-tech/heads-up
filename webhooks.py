@@ -14,6 +14,7 @@ Events:
   routing  a route hijack or leak involves a watched network
   truenas  iXsystems published a new TrueNAS advisory or impact statement
   fortinet Fortinet published advisories for your Fortinet products (or exploited ones)
+  vmware   Broadcom published a new VMware security advisory (VMSA)
   source   Heads Up or one of its sources stopped working, or recovered
 """
 import asyncio
@@ -37,10 +38,11 @@ EVENTS = {"act": "New in Act now", "soon": "New in Patch soon",
           "patch": "Patch Tuesday is out", "routing": "Routing incident on a watched network",
           "truenas": "New TrueNAS security advisory",
           "fortinet": "New Fortinet advisories for your products",
+          "vmware": "New VMware security advisory",
           "source": "Heads Up or a source stops working"}
 DEFAULT_EVENTS = ["act", "updated", "source"]
-COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55", "routing": "#6250d6", "truenas": "#0095d5", "fortinet": "#c8312b", "source": "#8b929c"}
-ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹", "routing": "🛰️", "truenas": "🗄️", "fortinet": "🧱", "source": "⚠️"}
+COLORS = {"act": "#d93a40", "soon": "#d26a00", "updated": "#e8730c", "status": "#23885a", "test": "#2f6fed", "patch": "#0e7a55", "routing": "#6250d6", "truenas": "#0095d5", "fortinet": "#c8312b", "vmware": "#607078", "source": "#8b929c"}
+ICONS = {"act": "🔴", "soon": "🟠", "updated": "📝", "status": "✅", "test": "👋", "patch": "🩹", "routing": "🛰️", "truenas": "🗄️", "fortinet": "🧱", "vmware": "🖥️", "source": "⚠️"}
 BATCH_LIMIT = 4   # more events than this for one webhook in one go -> one summary message
 
 SCHEMA = """

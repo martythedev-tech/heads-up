@@ -15,6 +15,7 @@ const SOURCES = {
   ms: { name: "Microsoft", what: "Patch Tuesday: Microsoft's monthly security fixes, including zero-days.", feeds: ["msrc"], url: "https://msrc.microsoft.com/update-guide", stale: 8 * 3600 },
   tn: { name: "TrueNAS", what: "iXsystems' advisories, and how much wider CVEs (kernel, Samba, ...) matter on TrueNAS.", feeds: ["truenas"], url: "https://security.truenas.com/", stale: 8 * 3600 },
   fn: { name: "Fortinet", what: "Fortinet PSIRT advisories for your products ({products}), with fixed versions.", feeds: ["fortinet"], url: "https://www.fortiguard.com/psirt", stale: 8 * 3600 },
+  vm: { name: "VMware (Broadcom)", what: "Broadcom's VMware security advisories (VMSAs), often days before the CVE records, with fixed versions for vCenter and ESXi.", feeds: ["vmsa"], url: "https://support.broadcom.com/web/ecx/security-advisory?segment=VC", stale: 8 * 3600 },
   ex: { name: "Exploit code", what: "Public attack code: Metasploit modules, Exploit-DB and proof-of-concepts on GitHub.", feeds: ["exploits", "poc"], url: "https://www.exploit-db.com", stale: 26 * 3600 },
 };
 const GROUPS = {
@@ -94,8 +95,9 @@ function buildVulns() {
     v.vcs = (src.vcIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.tns = (src.tnIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.fns = (src.fnIds || []).map((id) => byId.get(id)).filter(Boolean);
+    v.vms = (src.vmIds || []).map((id) => byId.get(id)).filter(Boolean);
     v.cveList = v.primary.cves || [];
-    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms, ...v.vcs, ...v.tns, ...v.fns].filter(Boolean);
+    v.items = [v.zw, ...v.kevs, ...v.usns, ...v.ms, ...v.vcs, ...v.tns, ...v.fns, ...v.vms].filter(Boolean);
     v.isNew = v.items.some(isNew);
     v.done = v.group === "done";
     v.why = src.why.map(([t, bold]) => (bold ? `<b>${esc(t)}</b>` : esc(t))).join("");
@@ -198,6 +200,7 @@ function badges(v) {
     const detail = f.exploited ? "exploited" : f.kind === "statement" ? "statement" : f.yours.length ? "your product" : "advisory";
     b.push(`<span class="badge fn">Fortinet <span class="detail">${detail}</span></span>`);
   }
+  if (v.vmsa) b.push(`<span class="badge vm">VMware <span class="detail">${v.vmsa.exploited ? "exploited" : esc(v.vmsa.rev || v.vmsa.id)}</span></span>`);
   if (v.truenas) b.push(`<span class="badge tn">TrueNAS <span class="detail">${v.truenas.level === "none" ? "not affected" : v.truenas.rating ? `impact ${esc(v.truenas.rating.toLowerCase())}` : "notice"}</span></span>`);
   if (v.exploit) b.push(`<span class="badge ex">${{ metasploit: "Metasploit", exploitdb: "Exploit-DB", poc: "GitHub" }[v.exploit]} <span class="detail">${v.exploit === "poc" ? "proof of concept" : "exploit"}</span></span>`);
   if (v.ubuntu.fixed.length) b.push(`<span class="badge ubu">Ubuntu <span class="detail">fix out</span></span>`);
@@ -440,6 +443,31 @@ function fnBox(v) {
   }).join("");
 }
 
+function vmBox(v) {
+  // VMSAs attached to this entry, then any VMSA naming one of its CVEs
+  const pages = new Map();
+  for (const i of v.vms) pages.set(i.extra.id, i.extra);
+  for (const c of v.cveList) if (c.vmsa && !pages.has(c.vmsa.id)) pages.set(c.vmsa.id, c.vmsa);
+  if (!pages.size) return "";
+  return [...pages.values()].slice(0, 2).map((a) => {
+    const sev = severity(a.cvss);
+    const sections = (a.sections || []).slice().sort((x, y) => (y.cvss ?? -1) - (x.cvss ?? -1));
+    const shown = sections.slice(0, 8);
+    const fixes = a.fixes || [];
+    return `<div class="box src-vm"><h4><span class="badge vm">VMware</span> Broadcom security advisory · ${esc(day(a.published))}${a.updated && a.updated !== a.published ? ` <span class="muted small">(updated ${esc(day(a.updated))})</span>` : ""}</h4>
+    <div class="kv">
+      <span class="k">Advisory</span><span><a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.rev || a.id)}</a> · ${esc(a.title)}</span>
+      ${a.products?.length ? `<span class="k">Products</span><span>${a.products.map(esc).join(", ")}</span>` : ""}
+      ${a.cvss != null ? `<span class="k">Broadcom's score</span><span><b class="v ${sev ? sev.cls : "none"}">${esc(a.severity || (sev ? sev.label : ""))} · up to ${a.cvss.toFixed(1)}</b></span>` : ""}
+      ${a.exploited ? `<span class="k">Exploited</span><span><b class="v crit">Broadcom says it is exploited in the wild</b></span>` : ""}
+      ${a.section && !a.sections ? `<span class="k">This CVE</span><span>${esc(a.section)}${a.cvss != null ? ` (${a.cvss.toFixed(1)})` : ""}</span>` : ""}
+      ${fixes.length ? `<span class="k">Fixed in</span><span><ul class="small plain fn-fixes">${fixes.map((f) => `<li>${esc(f.product)} ${esc(f.line)}: ${f.fixed ? `<b>${esc(f.fixed)}</b>` : "no fix for some of its CVEs yet (see the advisory)"}</li>`).join("")}</ul></span>` : ""}
+    </div>
+    ${shown.length ? `<ul class="small plain vm-sections">${shown.map((s) => `<li><b>${s.cvss != null ? s.cvss.toFixed(1) : "–"}</b> ${esc(s.title)} <span class="muted">${esc(s.cves.join(", "))}</span>${s.exploited ? ` <b class="v crit">exploited</b>` : ""}</li>`).join("")}${sections.length > shown.length ? `<li class="muted">+${sections.length - shown.length} more in the advisory</li>` : ""}</ul>` : ""}
+    <p class="small muted">The advisory has the full response matrix, workarounds and Broadcom's FAQ.</p></div>`;
+  }).join("");
+}
+
 function tnBox(v) {
   // pages attached to this entry, then pages that mention one of its CVEs
   const pages = new Map();
@@ -539,7 +567,7 @@ function renderDrawer(id, keepScroll) {
       <h3>${esc(v.title)}</h3>
       <p class="d-why">${v.why}</p>
     </div>
-    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${vcBox(v)}${msBox(v)}${fnBox(v)}${tnBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
+    <div class="d-body">${triageBox(v)}${cfBox(v)}${cisaBox(v)}${vcBox(v)}${msBox(v)}${fnBox(v)}${vmBox(v)}${tnBox(v)}${exploitBox(v)}${ubuBox(v)}${scoresBox(v)}</div>`;
   drawer.hidden = false;
   $("#scrim").hidden = false;
   if (keepScroll) drawer.scrollTop = scroll;
@@ -616,6 +644,7 @@ const EVENT_HELP = {
   patch: "Microsoft publishes a month's security updates: one summary with zero-days, criticals and what to patch first.",
   routing: "A route hijack or leak involves one of the networks you watch (set under Cloudflare Radar).",
   fortinet: "Fortinet publishes advisories for your Fortinet products (or says one is exploited): one message per batch with scores and fixed versions.",
+  vmware: "Broadcom publishes a new VMware security advisory (VMSA): its worst issues and scores, and which of your products it names.",
   truenas: "iXsystems publishes a new TrueNAS advisory or impact statement: its TrueNAS rating, fix version and what to do.",
 };
 
@@ -790,7 +819,7 @@ function invFormBox(e) {
     <p class="help small">Whole words, any case, matched against product names only (not descriptions). FortiGate shows up as <b>FortiOS</b> in Fortinet's and CISA's lists, so use “FortiGate, FortiOS”.</p>
     <div class="inv-preview" id="inv-preview"></div>
     <label>Versions we run (optional)<input name="version" maxlength="120" value="${esc(e.version || "")}" placeholder="e.g. 7.4.8 · 7.4.x for a mix · 2026-11 for Microsoft · 8.0 U3m for vCenter"></label>
-    <p class="help small">Fortinet and TrueNAS advisories are checked against these: when every version you run already has the fix, the item moves to Done by itself. For Microsoft products enter the month you're patched through (e.g. 2026-11 once November's Patch Tuesday update is installed everywhere): anything Microsoft fixed in that month or earlier moves to Done. VMware vCenter: the update (8.0 U3m) or the appliance version (8.0.3.01200); ESXi: the release and build (8.0 U3k build 25595708). Other sources don't publish fixed versions, so there it's a note. Use 7.4.x when you have several patch levels on one line: Heads Up then tells you which version to check for, but won't close the item by itself.</p>
+    <p class="help small">Fortinet, TrueNAS and VMware advisories are checked against these: when every version you run already has the fix, the item moves to Done by itself. For Microsoft products enter the month you're patched through (e.g. 2026-11 once November's Patch Tuesday update is installed everywhere): anything Microsoft fixed in that month or earlier moves to Done. VMware vCenter: the update (8.0 U3m) or the appliance version (8.0.3.01200); ESXi: the release and build (8.0 U3k build 25595708). Other sources don't publish fixed versions, so there it's a note. Use 7.4.x when you have several patch levels on one line: Heads Up then tells you which version to check for, but won't close the item by itself.</p>
     <label>Note (optional)<input name="note" maxlength="200" value="${esc(e.note || "")}" placeholder="e.g. 2 firewalls at HQ, owner: network team"></label>
     <p class="err" id="inv-err"></p>
     <div class="actions"><button type="button" class="ghost" id="inv-cancel">Cancel</button><button class="primary">${isNew ? "Add" : "Save"}</button></div>

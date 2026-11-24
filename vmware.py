@@ -147,14 +147,26 @@ def check(entry, ranges):
     on_line = [r for r in mine_r if tuple(r["line"]) == mine["line"][:len(r["line"])]]
     if not on_line:
         return {**base, "state": "unlisted", "fix": None}
-    on_line.sort(key=lambda r: len(r["line"]), reverse=True)
-    r = on_line[0]
-    if r["all"]:
+    depth = max(len(r["line"]) for r in on_line)
+    on_line = [r for r in on_line if len(r["line"]) == depth]
+    if any(r["all"] for r in on_line):   # some CVE has no fix on this line (yet)
         return {**base, "state": "affectedline", "fix": None}
-    fix = parse(r["upto"], k)
-    verdict = compare(mine, fix, k) if fix else None
-    state = {1: "fixed", 0: "upgrade", None: "line"}[verdict]
-    return {**base, "state": state, "fix": r["upto"]}
+    # One line can list several fixes: per CVE (U3m for one, U3k for another) and per update
+    # branch (8.0 U3m and the 8.0 U2f express patch). The fixes for your branch count; you
+    # need every one of them, so the worst verdict wins.
+    fixes = [(r["upto"], parse(r["upto"], k)) for r in on_line]
+    same = [f for f in fixes if f[1] and mine["update"] is not None and f[1]["update"] == mine["update"]]
+    verdicts = [(compare(mine, fx, k) if fx else None, upto, fx) for upto, fx in (same or fixes)]
+    rank = {0: 0, None: 1, 1: 2}
+    worst = min(rank[v] for v, _, _ in verdicts)
+    picked = [x for x in verdicts if rank[x[0]] == worst]
+    v, upto, _ = picked[0]
+    if worst != 2:
+        # the newest fix among the ones you lack
+        v, upto, _ = max(picked, key=lambda x: ((x[2] or {}).get("update") or 0, (x[2] or {}).get("letter") or "",
+                                               (x[2] or {}).get("build") or 0, (x[2] or {}).get("dotted") or ()))
+    state = {1: "fixed", 0: "upgrade", None: "line"}[v]
+    return {**base, "state": state, "fix": upto}
 
 
 def candidates(db, limit):

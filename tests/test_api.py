@@ -293,7 +293,7 @@ async def what_we_run(admin):
 async def webhooks(admin):
     _, meta = await admin.get("/api/webhooks")
     check("5 webhook types offered", set(meta["kinds"]) == {"rocketchat", "slack", "teams", "discord", "json"}, meta["kinds"])
-    documented = {"act", "soon", "updated", "status", "patch", "routing", "truenas", "fortinet", "source"}
+    documented = {"act", "soon", "updated", "status", "patch", "routing", "truenas", "fortinet", "vmware", "source"}
     check("all documented events offered", documented == set(meta["events"]), meta["events"])
     for body, why in (({"name": "x", "kind": "json", "url": "ftp://nope", "events": ["act"]}, "bad URL"),
                       ({"name": "x", "kind": "json", "url": HOOK + "/x", "events": []}, "no events"),

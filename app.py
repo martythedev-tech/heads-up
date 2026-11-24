@@ -40,12 +40,13 @@ import fortinet as FN
 import inventory as INV
 import vulncheck as VC
 import vmware as VM
+import vmsa as VMSA
 import ssvc as SSVC
 import users as U
 import vulns as V
 import webhooks as W
 
-VERSION = "0.19.0"
+VERSION = "0.20.0"
 UA = f"heads-up/{VERSION} (internal vulnerability dashboard)"
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("STATE_DIRECTORY", HERE / "state"))
@@ -141,6 +142,7 @@ def db_open():
     INV.migrate(db)
     VC.migrate(db)
     VM.migrate(db)
+    VMSA.migrate(db)
     SSVC.migrate(db)
     return db
 
@@ -276,6 +278,7 @@ class Fetcher:
         self.on_patch_tuesday = None
         self.on_truenas = None
         self.on_fortinet = None
+        self.on_vmsa = None
         self.rounds = 0
 
     async def get(self, url, *, params=None, as_json=False):
@@ -310,6 +313,7 @@ class Fetcher:
                     ("vulncheck", 6 * 3600, self.vulncheck),
                     ("truenas", 6 * 3600, self.truenas),
                     ("fortinet", 6 * 3600, self.fortinet),
+                    ("vmsa", 3 * 3600, self.vmsa),
                     ("enrich", 60 * 60, self.enrich),
                     ("radar", 60 * 60, self.radar),
                     ("backup", 24 * 3600, self.backup)]
@@ -506,6 +510,20 @@ class Fetcher:
             source_ok(self.db, "fortinet", n)
         if self.on_fortinet:
             await self.on_fortinet()
+
+    async def vmsa(self):
+        n = await VMSA.refresh(self.db, self.session, log=log)
+        with batch(self.db):
+            ids = []
+            for item in VMSA.items(self.db):
+                ids.append(item["id"])
+                upsert_item(self.db, item)
+                # its CVEs get Broadcom's scores right away, before enrichment gets to them
+                self.db.executemany("INSERT OR IGNORE INTO cve(id) VALUES(?)", [(c,) for c in item["cves"]])
+            retire_missing(self.db, "vmsa", ids)
+            source_ok(self.db, "vmsa", n)
+        if self.on_vmsa:
+            await self.on_vmsa()
 
     async def exploits(self):
         n = await X.refresh_index(self.db, self.session)
@@ -833,6 +851,12 @@ def build_state(db, inventory=None):
         cves[cve_id]["msFix"] = fix
     for cve_id, rs in VM.cve_ranges(db, cves).items():
         cves[cve_id]["vmware"] = rs
+    # Broadcom's advisory comes first and is kept current; it wins over the CVE record
+    for cve_id, rs in VMSA.cve_ranges(db, cves).items():
+        cves[cve_id]["vmware"] = rs
+    for cve_id, info in VMSA.cve_info(db, cves).items():
+        cves[cve_id]["vmsa"] = info
+        use_vendor_score(cves[cve_id], info, "Broadcom")
     for cve_id, s in SSVC.cve_info(db, cves).items():
         cves[cve_id]["ssvc"] = s
     for cve_id, info in FN.cve_info(db, cves).items():
@@ -933,6 +957,36 @@ async def announce_truenas(app):
             facts.append(("CVEs", r["cves"].replace(",", ", ")))
         body = " ".join(x for x in (r["impact"], r["todo"] or r["summary"]) if x)
         await app["hooks"].send_note("truenas", f"TrueNAS: {r['title']}", TN.shorten(body, 600), facts, r["link"])
+
+
+async def announce_vmsa(app):
+    """One webhook note per new VMware security advisory (VMSA) from Broadcom."""
+    db = app["db"]
+    rows = list(db.execute("SELECT * FROM vmsa ORDER BY published DESC"))
+    row = db.execute("SELECT value FROM meta WHERE key='vmsa_seen'").fetchone()
+    seen = set(json.loads(row[0])) if row else None
+    db.execute("INSERT OR REPLACE INTO meta VALUES('vmsa_seen', ?)",
+               (json.dumps(sorted({r["id"] for r in rows} | (seen or set()))),))
+    if seen is None:
+        return  # first run records what's already published
+    for r in rows:
+        if r["id"] in seen:
+            continue
+        x = VMSA.info(r)
+        log(f"alerts: vmsa {x['id']}")
+        top = sorted([s for s in x["sections"] if s["cvss"] is not None], key=lambda s: -s["cvss"])[:5]
+        body = "; ".join(f"{s['title']} ({s['cvss']:.1f})" for s in top) or x["title"]
+        mine = INV.Matcher(INV.entries(db)).match(" | ".join(["VMware", *x["products"]]))
+        facts = [("Severity", x["severity"] or "–"),
+                 ("Highest CVSS", f"{x['cvss']:.1f}" if x["cvss"] is not None else "–"),
+                 ("CVEs", str(len(json.loads(r["cves"] or "[]"))))]
+        if mine:
+            facts.append(("You run", ", ".join(mine)))
+        if x["exploited"]:
+            facts.append(("Exploited", "Broadcom says it is exploited in the wild"))
+        flag = "EXPLOITED · " if x["exploited"] else ""
+        await app["hooks"].send_note("vmware", f"{flag}VMware {x['rev']}: {x['title']}",
+                                     TN.shorten(body, 600), facts, x["link"])
 
 
 async def announce_fortinet(app):
@@ -1434,6 +1488,7 @@ def make_app(db, fetcher):
     fetcher.on_patch_tuesday = lambda: announce_patch_tuesday(app)
     fetcher.on_truenas = lambda: announce_truenas(app)
     fetcher.on_fortinet = lambda: announce_fortinet(app)
+    fetcher.on_vmsa = lambda: announce_vmsa(app)
     app.router.add_get("/api/charts", api_charts)
     app.router.add_get("/api/settings", api_settings)
     app.router.add_post("/api/settings/radar", api_settings_radar)
